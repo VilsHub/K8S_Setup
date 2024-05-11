@@ -83,12 +83,15 @@ function setupContainerd (){
     installationType=$1
     which containerd &> /dev/null
     ec=$?
+
+    # Set path if not exist
+    createPathIfNotExist "/etc/containerd/"
     
     if [ $ec -eq 1 ]; then 
         # Not found in standard path
         /usr/local/bin/containerd config default > /etc/containerd/config.toml
     else
-        # Found
+        # Found  
         containerd config default > /etc/containerd/config.toml
     fi
 
@@ -429,7 +432,7 @@ sysctl --system
 # Install KubeADM, Kublet and Kubectl
 if [ $osFamily == "debian"  ]; then
 
-    apt update
+    apt update -y
 
     # Install dependencies for CoreDNS
     apt install -y apt-transport-https ca-certificates curl #
@@ -440,7 +443,7 @@ if [ $osFamily == "debian"  ]; then
     # Install kubectl, kubelet and kubeadm
     curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
     echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list
-    apt update
+    apt update -y
     apt install -y kubelet kubeadm kubectl
     apt-mark hold kubelet kubeadm kubectl
 
