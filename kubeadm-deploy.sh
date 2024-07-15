@@ -112,6 +112,38 @@ function setupContainerd (){
     fi
     
 }
+function isRunning(){
+    serviceName=$1
+    state=$2
+
+    systemctl status $serviceName | grep -w "$state" &> /dev/null
+    ec=$?
+
+    if [ $ec -eq 0 ]; then
+        status="yes"
+    else
+        status="no"
+    fi
+    
+    echo $status
+
+}
+function disabledFirewall(){
+    targetFirewall=$1
+    which "$targetFirewall" &> /dev/null
+    ec=$?
+    if [ $ec -eq 0 ]; then
+        # ufw exist, check if it is running
+        if [ $(isRunning "$targetFirewall" "Active: active") = "yes" ]; then
+            echo "${targetFirewall^^} firewall found running, disabling in progress......"
+            systemctl stop "$targetFirewall"
+            systemctl disable "$targetFirewall" &&
+            echo "${targetFirewall^^}  firewall disabled successfully!"
+        else
+            echo "${targetFirewall^^}  firewall found not running.......state OK!"
+        fi
+    fi
+}
 # ______________Functions Definitions Ends_____________
 
 
@@ -137,6 +169,15 @@ select res in "${envNodeType[@]}"; do
     done
     break
 done
+
+# Check if firewall is enabled
+# UFW firewal check
+echo  -e "Checking if Firewall is disabled......\n"
+disabledFirewall ufw
+disabledFirewall firewalld
+echo  "Firewall check completed successfully!"
+
+
 echo -e "\n"
 read -p "Please specify the server private IP address: " privateIP
 echo -e "\n"
@@ -425,6 +466,12 @@ net.bridge.bridge-nf-call-iptables  = 1
 net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
 EOF
+
+# Disable SELINUX for Redhat
+if [ -f "/etc/selinux/config" ]; then
+    # Set SELINUX=disabled 
+    sed -i 's/\(SELINUX=\).*/\1disabled/' /etc/selinux/config
+fi
 
 # > Apply sysctl params without reboot
 sysctl --system
