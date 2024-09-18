@@ -185,12 +185,13 @@ echo -e "\n"
 # Checking if hostname is resolved to private IP
 echo -e "Checking if hostname is resolved to private IP......\n"
 server_name=$(hostname)
+server_name=${server_name,,} 
 grepResult=$(grep -E "^\s*$privateIP\s+$server_name\s*$" /etc/hosts)
 
 if [ -n "$grepResult" ]; then
     echo -e "The hostname '$(hostname)' is set to the IP address '$privateIP' in '/etc/hosts' file, proceeding to setup....\n"
 else
-    echo "The hostname '$(hostname)' is not set to the IP address '$privateIP' in '/etc/hosts', please set this and try again"
+    echo "The hostname '$server_name' is not set to the IP address '$privateIP' in '/etc/hosts', please set this and try again"
     exit 1
 fi
 
@@ -542,7 +543,8 @@ if [ $entSelectedOpt == "1" ]; then
         # Install any of the network add (Install CNI [Container Network Interface] plugins) on at [https://kubernetes.io/docs/concepts/cluster-administration/addons/] preferably Flannel (Master node)
         echo -e "\nSetting up CNI with Flannel"
         kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
-        kubectl taint node $(hostname) node-role.kubernetes.io/control-plane:NoSchedule-
+
+        kubectl taint node $server_name node-role.kubernetes.io/control-plane:NoSchedule-
 
         echo -e "Post operation completed successfully...\n"
 
