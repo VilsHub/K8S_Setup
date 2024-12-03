@@ -6,13 +6,12 @@ DISTRO=""
 socketFile=""
 
 # ______________Functions Definitions Starts___________
-function createPathIfNotExist () {
+function createPathIfNotExist() {
     if [ ! -d $1 ]; then
         mkdir -p $1
     fi
 }
-
-function downloadContainerd () {
+function downloadContainerd() {
     # $1 can either be "new" or "upgrade"
     downloadFor=$1
     setupDir=$2
@@ -24,7 +23,7 @@ function downloadContainerd () {
     repoLink=""
     while [ $check -eq 0 ]; do
 
-        read -p "Please specify the version of Containerd to be installed: " containerdVersion
+        read -p "Please specify the version of Containerd to be installed (e.g. 1.6.24): " containerdVersion
         echo "Checking if the Containerd version '$containerdVersion' is avaialble for installation...."
         repoLink="https://github.com/containerd/containerd/releases/download/v$containerdVersion/containerd-$containerdVersion-linux-amd64.tar.gz"
         wget -O $setupDir/ctdf $repoLink | &> /dev/null
@@ -77,8 +76,51 @@ function downloadContainerd () {
     fi
 
 }
+function downloadHelm() {
+    setupDir=$1
+    dependenciesDir=$2
 
-function setupContainerd (){
+    # Not found
+    echo "Visit the link to see the available Helm versions to use, : https://github.com/helm/helm/releases"
+    check=0
+    repoLink=""
+    while [ $check -eq 0 ]; do
+
+        read -p "Please specify the version of Helm to be installed (e.g. 3.7.2) or press ENTER to install the default version (3.7.2): " HelmVersion
+
+        repoLink="https://get.helm.sh/helm-v$HelmVersion-linux-amd64.tar.gz"
+
+        if [ ${#HelmVersion} -gt 0 ]; then
+            # Version specified
+            curl -I $repoLink &> $setupDir/hlmf
+
+            cat $setupDir/hlmf | grep -i "404" &> /dev/null
+            ec=$?
+
+            if [ $ec -eq 0 ]; then
+                # Not Found
+                echo -e "\nHelm with the version '$HelmVersion' is not found, kindly confirm the version specified, or press ENTER to install the default version (3.7.2)"
+            else
+                check=1
+                echo -e "Helm '$containerdVersion' found for installation"
+            fi
+
+        elif [ ${#HelmVersion} -eq 0  ]; then
+            # No version specified, use default version
+            HelmVersion="3.7.2"
+            repoLink="https://get.helm.sh/helm-v$HelmVersion-linux-amd64.tar.gz"
+
+        fi
+    done
+
+    # Download Helm
+    echo "Installing Helm v$HelmVersion"
+    wget -O $dependenciesDir/helm-v$HelmVersion-linux-amd64.tar.gz $repoLink
+    tar -xvf $dependenciesDir/helm-v$HelmVersion-linux-amd64.tar.gz -C $dependenciesDir
+    mv $dependenciesDir/linux-amd64/helm /usr/local/bin/
+    echo -e "\nHelm installation completed\n"
+}
+function setupContainerd(){
     # $1 can either be "new", "current" and "upgrade"
     installationType=$1
     which containerd &> /dev/null
@@ -182,18 +224,8 @@ echo -e "\n"
 read -p "Please specify the server private IP address: " privateIP
 echo -e "\n"
 
-# Checking if hostname is resolved to private IP
-echo -e "Checking if hostname is resolved to private IP......\n"
 server_name=$(hostname)
 server_name=${server_name,,} 
-grepResult=$(grep -E "^\s*$privateIP\s+$server_name\s*$" /etc/hosts)
-
-if [ -n "$grepResult" ]; then
-    echo -e "The hostname '$(hostname)' is set to the IP address '$privateIP' in '/etc/hosts' file, proceeding to setup....\n"
-else
-    echo "The hostname '$server_name' is not set to the IP address '$privateIP' in '/etc/hosts', please set this and try again"
-    exit 1
-fi
 
 PS3="Please select your preferred container runtime: "
 containerRuntimeType=("Containerd" "Containerd with Docker (Not stable yet)" "CRI-O")
@@ -286,8 +318,8 @@ if [ $containerRuntime == "crio" ]; then
     repoLink=""
     while [ $check -eq 0 ]; do
 
-        read -p "Please specify the version of CRI-O to be installed: " crioVersion
-        read -p "Please specify the OS label for this environment: " osLabel
+        read -p "Please specify the version of CRI-O to be installed (e.g. 1.2.8): " crioVersion
+        read -p "Please specify the OS label for this environment (e.g. CentOS_9_Stream): " osLabel
         echo "Checking if the CRIO version '$crioVersion' is avaialble for installation...."
         repoLink="https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$crioVersion/$osLabel/devel:kubic:libcontainers:stable:cri-o:$crioVersion.repo"
         baseLink="https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$crioVersion/$osLabel"
@@ -546,14 +578,19 @@ if [ $entSelectedOpt == "1" ]; then
 
         kubectl taint node $server_name node-role.kubernetes.io/control-plane:NoSchedule-
 
-        echo -e "Post operation completed successfully...\n"
-
         # Install Helm and run on the master node only
-        echo "Installing Helm repo v3.7.2"
-        wget -O $dependenciesDir/helm-v3.7.2-linux-amd64.tar.gz https://get.helm.sh/helm-v3.7.2-linux-amd64.tar.gz
-        tar -xvf $dependenciesDir/helm-v3.7.2-linux-amd64.tar.gz -C /usr/local/bin/
-        echo -e "Helm installation completed\n"
+        read -p "Would you like to setup Helm repo manager for this cluster (Y/N)?: " setupHelm
+        
+        if [[ $setupHelm = "y" || $setupHelm = "Y" ]]; then
+            res=0
+            while [ $res -eq 0 ]; do
+                downloadHelm $setupDir $dependenciesDir
+                res=1
+            done
 
+        fi
+
+        echo -e "\nPost operation completed successfully...\n"
     else
         echo -e "There was a problem initiating the control plane"
     fi

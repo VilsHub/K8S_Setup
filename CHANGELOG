@@ -1,0 +1,4 @@
+v1.2.0
+	- Fixed missing helm path in environment variable
+	- Added option to select helm version
+	- Added versioning example, on prompt
