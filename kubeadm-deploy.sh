@@ -4,6 +4,7 @@ OS_NAME=""
 VERSION=""
 DISTRO=""
 socketFile=""
+containerRuntimeVersion=""
 
 # ______________Functions Definitions Starts___________
 function createPathIfNotExist() {
@@ -24,6 +25,7 @@ function downloadContainerd() {
     while [ $check -eq 0 ]; do
 
         read -p "Please specify the version of Containerd to be installed (e.g. 1.6.24): " containerdVersion
+        containerRuntimeVersion=$containerdVersion
         echo "Checking if the Containerd version '$containerdVersion' is avaialble for installation...."
         repoLink="https://github.com/containerd/containerd/releases/download/v$containerdVersion/containerd-$containerdVersion-linux-amd64.tar.gz"
         wget -O $setupDir/ctdf $repoLink | &> /dev/null
@@ -313,16 +315,21 @@ fi
 echo -e "\n"
 echo -e "Setting up K8S with $containerRuntime.....\n"
 if [ $containerRuntime == "crio" ]; then
-    echo "Visit the link to see the available versions to use, then click on your target version to get the OS label: https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/"
+    echo "Visit the link to see the available versions to use: https://download.opensuse.org/repositories/isv:/cri-o:/stable:/"
+    
     check=0
     repoLink=""
     while [ $check -eq 0 ]; do
 
-        read -p "Please specify the version of CRI-O to be installed (e.g. 1.2.8): " crioVersion
-        read -p "Please specify the OS label for this environment (e.g. CentOS_9_Stream): " osLabel
+        read -p "Please specify the version of CRI-O to be installed (e.g. 1.28): " crioVersion
+        containerRuntimeVersion=$crioVersion
+        # read -p "Please specify the OS label for this environment (e.g. CentOS_9_Stream): " osLabel
         echo "Checking if the CRIO version '$crioVersion' is avaialble for installation...."
-        repoLink="https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$crioVersion/$osLabel/devel:kubic:libcontainers:stable:cri-o:$crioVersion.repo"
-        baseLink="https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$crioVersion/$osLabel"
+        # repoLink="https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$crioVersion/$osLabel/devel:kubic:libcontainers:stable:cri-o:$crioVersion.repo"
+        
+        repoLink="https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key"
+        
+        baseLink="https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key"
         
         targetLink=$( [ $osFamily == "redhat" ] && echo $repoLink  || echo $baseLink)
         
@@ -333,10 +340,10 @@ if [ $containerRuntime == "crio" ]; then
 
             if [ $ec -eq 0 ]; then
                 # Not Found
-                echo "CRI-O with the version '$crioVersion' is not found, kindly confirm the OS label and the version specified"
+                echo "CRI-O with the version '$crioVersion' is not found, kindly confirm the version specified"
             else
                 check=1
-                echo -e "CRI-O version '$crioVersion' found for $osLabel"
+                echo -e "CRI-O version '$crioVersion' found for installation"
             fi
         fi
     done
@@ -353,22 +360,26 @@ if [ $containerRuntime == "crio" ]; then
     elif [ $osFamily == "debian" ]; then
 
         # Ubuntu
-        echo 'deb http://deb.debian.org/debian buster-backports main' > /etc/apt/sources.list.d/backports.list
-        apt update -y
-        apt install -y -t buster-backports libseccomp2 || apt update -y -t buster-backports libseccomp2
+        # echo 'deb http://deb.debian.org/debian buster-backports main' > /etc/apt/sources.list.d/backports.list
+        # apt update -y
+        # apt install -y -t buster-backports libseccomp2 || apt update -y -t buster-backports libseccomp2
 
         # Set path if not exist
-        createPathIfNotExist "/usr/share/keyrings"
+        createPathIfNotExist "/etc/apt/keyrings"
 
-        echo "deb [signed-by=/usr/share/keyrings/libcontainers-archive-keyring.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$osLabel/ /" > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
-        echo "deb [signed-by=/usr/share/keyrings/libcontainers-crio-archive-keyring.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$crioVersion/$osLabel/ /" > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable:cri-o:$osLabel.list
+        # echo "deb [signed-by=/usr/share/keyrings/libcontainers-archive-keyring.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$osLabel/ /" > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
+        # echo "deb [signed-by=/usr/share/keyrings/libcontainers-crio-archive-keyring.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$crioVersion/$osLabel/ /" > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable:cri-o:$osLabel.list
 
-        mkdir -p /usr/share/keyrings
-        curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$osLabel/Release.key | gpg --dearmor -o /usr/share/keyrings/libcontainers-archive-keyring.gpg
-        curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$crioVersion/$osLabel/Release.key | gpg --dearmor -o /usr/share/keyrings/libcontainers-crio-archive-keyring.gpg
+        # mkdir -p /usr/share/keyrings
+        # curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$osLabel/Release.key | gpg --dearmor -o /usr/share/keyrings/libcontainers-archive-keyring.gpg
+        # curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$crioVersion/$osLabel/Release.key | gpg --dearmor -o /usr/share/keyrings/libcontainers-crio-archive-keyring.gpg
+
+        curl -fsSL https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/cri-o-apt-keyring.gpg
+
+        echo "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/ /" | tee /etc/apt/sources.list.d/cri-o.list
 
         apt-get update -y
-        apt-get install -y cri-o cri-o-runc
+        apt-get install -y cri-o #cri-o-runc
 
     fi
 
@@ -430,6 +441,7 @@ elif [ $containerRuntime == "containerd" ]; then
     else
         # Installed
         installedContainerdVersion=$(containerd --version | cut -d' ' -f3)
+        containerRuntimeVersion=$installedContainerdVersion
 
         read -p "Your current containerd version is '$installedContainerdVersion', would you like to setup with this version? y/n: " downloadNewVersion
 
@@ -443,6 +455,42 @@ elif [ $containerRuntime == "containerd" ]; then
     fi
 
 fi
+
+# Choose kubelet version
+
+echo "Visit the link to see the available versions to use: https://github.com/kubernetes/kubernetes/tags"
+    
+check=0
+k8sKey=""
+k8sVersion=""
+while [ $check -eq 0 ]; do
+
+    read -p "Please specify the version (must be compatible with $containerRuntime v$containerRuntimeVersion) of Kubelet to be installed (e.g. 1.28): " kubeletVersion
+    echo "Checking if the Kubelet version '$kubeletVersion' is avaialble for installation...."
+        
+    debKeyLink="https://pkgs.k8s.io/core:/stable:/v$kubeletVersion/deb/Release.key"
+    
+    rpmKeyLink="https://pkgs.k8s.io/core:/stable:/v$kubeletVersion/rpm/repodata/repomd.xml.key"
+    
+    targetLink=$( [ $osFamily == "redhat" ] && echo $debKeyLink  || echo $rpmKeyLink)
+    
+    if [[ $osFamily == "redhat" || $osFamily == "debian" ]]; then
+        wget -O $setupDir/tz $targetLink | &> /dev/null
+        cat $setupDir/tz | grep "END PGP PUBLIC KEY BLOCK" &> /dev/null
+        ec=$?
+
+        if [ $ec -eq 0 ]; then
+            check=1
+            echo -e "Kubelet version '$kubeletVersion' found for installation"
+            k8sKey=$targetLink
+            k8sVersion=$kubeletVersion
+        else
+            # Not Found
+            echo "Kubelet with the version '$kubeletVersion' is not found, kindly confirm the version specified"
+        fi
+    fi
+done
+
 
 # Disable Swap
 sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
@@ -521,8 +569,8 @@ if [ $osFamily == "debian"  ]; then
     createPathIfNotExist "/etc/apt/keyrings/"
 
     # Install kubectl, kubelet and kubeadm
-    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v$k8sVersion/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v$k8sVersion/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
     apt update -y
     apt install -y kubelet kubeadm kubectl
     apt-mark hold kubelet kubeadm kubectl
@@ -532,10 +580,10 @@ elif [ $osFamily == "redhat" ]; then
     # This overwrites any existing configuration in /etc/yum.repos.d/kubernetes.repo
     echo "[kubernetes]"     >> /etc/yum.repos.d/kubernetes.repo
     echo "name=Kubernetes"  >> /etc/yum.repos.d/kubernetes.repo
-    echo "baseurl=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/" >> /etc/yum.repos.d/kubernetes.repo
+    echo "baseurl=https://pkgs.k8s.io/core:/stable:/v$k8sVersion/rpm/" >> /etc/yum.repos.d/kubernetes.repo
     echo "enabled=1" >> /etc/yum.repos.d/kubernetes.repo
     echo "gpgcheck=1" >> /etc/yum.repos.d/kubernetes.repo
-    echo "gpgkey=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key" >> /etc/yum.repos.d/kubernetes.repo
+    echo "gpgkey=https://pkgs.k8s.io/core:/stable:/v$k8sVersion/rpm/repodata/repomd.xml.key" >> /etc/yum.repos.d/kubernetes.repo
 
     yum install yum-utils ca-certificates curl
     dnf install dnf-plugins-core &> /dev/null

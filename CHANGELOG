@@ -1,3 +1,7 @@
+v2.0.0
+	- Added option to select K8s version
+	- 
+
 v1.2.0
 	- Fixed missing helm path in environment variable
 	- Added option to select helm version
