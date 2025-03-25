@@ -1,6 +1,9 @@
 v2.0.0
 	- Added option to select K8s version
-	- 
+	- Optimised CRIO installation flow to support the new CRIO subproject https://download.opensuse.org/repositories/isv:/cri-o
+	- Optimised codes
+	- Fixed Typo errors
+	- Fix SELINUX issue on RedHat System
 
 v1.2.0
 	- Fixed missing helm path in environment variable

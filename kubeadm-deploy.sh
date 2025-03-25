@@ -104,7 +104,7 @@ function downloadHelm() {
                 echo -e "\nHelm with the version '$HelmVersion' is not found, kindly confirm the version specified, or press ENTER to install the default version (3.7.2)"
             else
                 check=1
-                echo -e "Helm '$containerdVersion' found for installation"
+                echo -e "Helm '$HelmVersion' found for installation"
             fi
 
         elif [ ${#HelmVersion} -eq 0  ]; then
@@ -119,7 +119,7 @@ function downloadHelm() {
     echo "Installing Helm v$HelmVersion"
     wget -O $dependenciesDir/helm-v$HelmVersion-linux-amd64.tar.gz $repoLink
     tar -xvf $dependenciesDir/helm-v$HelmVersion-linux-amd64.tar.gz -C $dependenciesDir
-    mv $dependenciesDir/linux-amd64/helm /usr/local/bin/
+    mv $dependenciesDir/linux-amd64/helm /usr/bin/
     echo -e "\nHelm installation completed\n"
 }
 function setupContainerd(){
@@ -315,6 +315,8 @@ fi
 echo -e "\n"
 echo -e "Setting up K8S with $containerRuntime.....\n"
 if [ $containerRuntime == "crio" ]; then
+    # [Setup link: https://cri-o.io/]
+
     echo "Visit the link to see the available versions to use: https://download.opensuse.org/repositories/isv:/cri-o:/stable:/"
     
     check=0
@@ -322,19 +324,15 @@ if [ $containerRuntime == "crio" ]; then
     while [ $check -eq 0 ]; do
 
         read -p "Please specify the version of CRI-O to be installed (e.g. 1.28): " crioVersion
+
         containerRuntimeVersion=$crioVersion
-        # read -p "Please specify the OS label for this environment (e.g. CentOS_9_Stream): " osLabel
+
         echo "Checking if the CRIO version '$crioVersion' is avaialble for installation...."
-        # repoLink="https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$crioVersion/$osLabel/devel:kubic:libcontainers:stable:cri-o:$crioVersion.repo"
         
-        repoLink="https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key"
-        
-        baseLink="https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key"
-        
-        targetLink=$( [ $osFamily == "redhat" ] && echo $repoLink  || echo $baseLink)
+        repoKey="https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key"
         
         if [[ $osFamily == "redhat" || $osFamily == "debian" ]]; then
-            wget -O $setupDir/tz $targetLink | &> /dev/null
+            wget -O $setupDir/tz $repoKey | &> /dev/null
             cat $setupDir/tz | grep "ERROR 404" &> /dev/null
             ec=$?
 
@@ -351,35 +349,32 @@ if [ $containerRuntime == "crio" ]; then
     # Begin downloading CRI-O runtime
     if [ $osFamily == "redhat" ]; then
 
-        # CentOS
-        curl -L -o /etc/yum.repos.d/devel:kubic:libcontainers:stable.repo https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$osLabel/devel:kubic:libcontainers:stable.repo
-        cp $setupDir/tz /etc/yum.repos.d/devel:kubic:libcontainers:stable:cri-o:$crioVersion.repo 
+        # CentOS       
+        
+        # Write CRI-O config below to the file /etc/yum.repos.d/cri-o.repo
+
+            # [cri-o]
+            # name=CRI-O
+            # baseurl=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/$CRIO_VERSION/rpm/
+            # enabled=1
+            # gpgcheck=1
+        
+        printf "[cri-o]\nname=CRI-O\nbaseurl=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/rpm/\nenabled=1\ngpgcheck=1\ngpgkey=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/rpm/repodata/repomd.xml.key\n" | tee /etc/yum.repos.d/cri-o.repo > /dev/null
+        
         yum update -y
         yum install -y cri-o
 
     elif [ $osFamily == "debian" ]; then
 
-        # Ubuntu
-        # echo 'deb http://deb.debian.org/debian buster-backports main' > /etc/apt/sources.list.d/backports.list
-        # apt update -y
-        # apt install -y -t buster-backports libseccomp2 || apt update -y -t buster-backports libseccomp2
-
         # Set path if not exist
         createPathIfNotExist "/etc/apt/keyrings"
-
-        # echo "deb [signed-by=/usr/share/keyrings/libcontainers-archive-keyring.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$osLabel/ /" > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
-        # echo "deb [signed-by=/usr/share/keyrings/libcontainers-crio-archive-keyring.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$crioVersion/$osLabel/ /" > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable:cri-o:$osLabel.list
-
-        # mkdir -p /usr/share/keyrings
-        # curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$osLabel/Release.key | gpg --dearmor -o /usr/share/keyrings/libcontainers-archive-keyring.gpg
-        # curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$crioVersion/$osLabel/Release.key | gpg --dearmor -o /usr/share/keyrings/libcontainers-crio-archive-keyring.gpg
 
         curl -fsSL https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/cri-o-apt-keyring.gpg
 
         echo "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/ /" | tee /etc/apt/sources.list.d/cri-o.list
 
         apt-get update -y
-        apt-get install -y cri-o #cri-o-runc
+        apt-get install -y cri-o 
 
     fi
 
@@ -458,14 +453,23 @@ fi
 
 # Choose kubelet version
 
-echo "Visit the link to see the available versions to use: https://github.com/kubernetes/kubernetes/tags"
+compatiblityDocLink=""
+
+if [ $containerRuntime = "containerd" ]; then
+    compatiblityDocLink="https://containerd.io/releases/#kubernetes-support"
+else
+    compatiblityDocLink="https://github.com/cri-o/cri-o?tab=readme-ov-file#compatibility-matrix-cri-o--kubernetes"
+fi
+
+echo -e "\nVisit the link (https://github.com/kubernetes/kubernetes/tags) to see the available versions of Kublet to use, and for compatiblity with $containerRuntime version $containerRuntimeVersion see: $compatiblityDocLink \n"
+
     
 check=0
 k8sKey=""
 k8sVersion=""
 while [ $check -eq 0 ]; do
 
-    read -p "Please specify the version (must be compatible with $containerRuntime v$containerRuntimeVersion) of Kubelet to be installed (e.g. 1.28): " kubeletVersion
+    read -p "Please specify the version (must be compatible with $containerRuntime v$containerRuntimeVersion) of Kubelet to be installed (Major.Minor only e.g. 1.28): " kubeletVersion
     echo "Checking if the Kubelet version '$kubeletVersion' is avaialble for installation...."
         
     debKeyLink="https://pkgs.k8s.io/core:/stable:/v$kubeletVersion/deb/Release.key"
@@ -552,6 +556,7 @@ EOF
 if [ -f "/etc/selinux/config" ]; then
     # Set SELINUX=disabled 
     sed -i 's/\(SELINUX=\).*/\1disabled/' /etc/selinux/config
+    setenforce 0
 fi
 
 # > Apply sysctl params without reboot
@@ -588,7 +593,7 @@ elif [ $osFamily == "redhat" ]; then
     yum install yum-utils ca-certificates curl
     dnf install dnf-plugins-core &> /dev/null
 
-    yum install -y kubeadm kubelet
+    yum install -y kubeadm kubelet kubectl
 
 fi
 
@@ -638,7 +643,17 @@ if [ $entSelectedOpt == "1" ]; then
 
         fi
 
-        echo -e "\nPost operation completed successfully...\n"
+        which helm &> /dev/null
+        ec=$?
+
+        if [ $ec -eq 0 ]; then
+            # Installed helm
+            echo -e "\nPost operation completed successfully...\n"
+        else
+            # Installation failed helm
+            echo -e "\nPost operation failed... Try installing helm manually\n"
+        fi
+
     else
         echo -e "There was a problem initiating the control plane"
     fi
