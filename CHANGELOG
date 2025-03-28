@@ -1,3 +1,10 @@
+v2.1.0
+	- Added option to reset cluster
+	- Added option to initialize cluster only
+	- Added option to setup and initialize cluster
+	- Added option to setup K8s without initilaization
+	- Optimised codes
+
 v2.0.0
 	- Added option to select K8s version
 	- Optimised CRIO installation flow to support the new CRIO subproject https://download.opensuse.org/repositories/isv:/cri-o

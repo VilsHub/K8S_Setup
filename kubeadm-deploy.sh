@@ -188,428 +188,460 @@ function disabledFirewall(){
         fi
     fi
 }
-# ______________Functions Definitions Ends_____________
+function getSocket(){
 
+    crtSelectedOpt=$1
+    returnType=$2  # 1=> socket, 2=> runtimetype
+    containerRuntime=""
+    socketFile=""
 
-if [ -f /etc/os-release ]; then
-    source /etc/os-release
-    OS_NAME=$NAME
-    VERSION=$VERSION_ID
-    DISTRO=$ID
-fi
+    if [ $crtSelectedOpt = "1" ]; then
+        containerRuntime="containerd"
+        socketFile="unix:///var/run/containerd/containerd.sock"
+    elif [[ $crtSelectedOpt = "2"  ]]; then
+        containerRuntime="docker"
+        socketFile="unix:///var/run/containerd/containerd.sock"
+    else
+        containerRuntime="crio"
+        socketFile="unix:///var/run/crio/crio.sock"
+    fi
 
-PS3="Please select the environment node type: "
-envNodeType=("Master" "Worker")
-entSelectedOpt=0
-
-select res in "${envNodeType[@]}"; do
-    entSelectedOpt=$REPLY
-    while [[ $REPLY != "1" && $REPLY != "2" ]]; do
-        PS3="Please select a valid option for the environemnt node type: "
-        select res in "${envNodeType[@]}"; do
-            entSelectedOpt=$REPLY
-            break
-        done
-    done
-    break
-done
-
-# Check if firewall is enabled
-# UFW firewal check
-echo  -e "Checking if Firewall is disabled......\n"
-disabledFirewall ufw
-disabledFirewall firewalld
-echo  "Firewall check completed successfully!"
-
-
-echo -e "\n"
-read -p "Please specify the server private IP address: " privateIP
-echo -e "\n"
-
-server_name=$(hostname)
-server_name=${server_name,,} 
-
-PS3="Please select your preferred container runtime: "
-containerRuntimeType=("Containerd" "Containerd with Docker (Not stable yet)" "CRI-O")
-crtSelectedOpt=0
-
-select res in "${containerRuntimeType[@]}"; do
-    crtSelectedOpt=$REPLY
-    while [[ $REPLY != "1" && $REPLY != "2" && $REPLY != "3" ]]; do
-        PS3="Please select a valid option for the container runtime type to be used for the setup: "
-        select res in "${containerRuntimeType[@]}"; do
-            crtSelectedOpt=$REPLY
-            break
-        done
-    done
-    break
-done
-
-# Compute selected value for containerRuntime 
-if [ $crtSelectedOpt == "1" ]; then
-    containerRuntime="containerd"
-    socketFile="unix:///var/run/containerd/containerd.sock"
-elif [[ $crtSelectedOpt == "2"  ]]; then
-    containerRuntime="docker"
-    socketFile="unix:///var/run/containerd/containerd.sock"
-else
-    containerRuntime="crio"
-    socketFile="unix:///var/run/crio/crio.sock"
-fi
-
-# Compute OS family
-pm=""
-osFamily=""
-case "$DISTRO" in
-    ubuntu|debian)
-        osFamily="debian"
-        pm="apt"
-    ;;
-    centos|rhel)
-        osFamily="redhat"
-        pm="yum"
-    ;;
-    fedora)
-        osFamily="fedora"
-        pm="dnf"
-    ;;
-    opensuse)
-        osFamily="opensuse"
-        pm="zypper"
-    ;;
-    *)
-    echo "Unsupported OS: $ID"
-    exit 1
-    ;;
-esac
-
-# Prerequisite : wget
-which wget &> /dev/null
-ec=$?
-
-if [ $ec -gt 0 ]; then
-    # Install wget
-    $pm install wget -y
-fi
-
-# Prerequisite : gpg
-which gpg &> /dev/null
-ec=$?
-
-if [ $ec -gt 0 ]; then
-    # Install gpg
-    $pm install gpg -y
-fi
-
-# Setup directory
-setupDir=/tmp/k8s-setup
-dependenciesDir=/tmp/k8s-setup/dependencies
-
-if [ ! -d $setupDir ]; then
-    mkdir -p $setupDir
-    mkdir -p $dependenciesDir
-fi
-
-# Compute runtime version to be downloaded
-
-echo -e "\n"
-echo -e "Setting up K8S with $containerRuntime.....\n"
-if [ $containerRuntime == "crio" ]; then
-    # [Setup link: https://cri-o.io/]
-
-    echo "Visit the link to see the available versions to use: https://download.opensuse.org/repositories/isv:/cri-o:/stable:/"
+    if [ $returnType = "1" ]; then #Return socket
+        echo $socketFile
+    else # Return runtime
+        echo $containerRuntime
+    fi
     
+}
+function setupK8s(){
+    setupType=$1
+    PS3="Please select the environment node type: "
+    envNodeType=("Master" "Worker")
+    entSelectedOpt=0
+
+    select res in "${envNodeType[@]}"; do
+        entSelectedOpt=$((REPLY))
+        while [ $entSelectedOpt -gt 2 ]; do
+            PS3="Please select a valid option for the environemnt node type: "
+            select res in "${envNodeType[@]}"; do
+                entSelectedOpt=$((REPLY))
+                break
+            done
+        done
+        break
+    done
+
+    # Check if firewall is enabled
+    # UFW firewal check
+    echo  -e "Checking if Firewall is disabled......\n"
+    disabledFirewall ufw
+    disabledFirewall firewalld
+    echo  "Firewall check completed successfully!"
+
+
+    echo -e "\n"
+    read -p "Please specify the server private IP address: " privateIP
+    echo -e "\n"
+
+    server_name=$(hostname)
+    server_name=${server_name,,} 
+
+    containerRuntime=""
+    socketFile=""
+
+    runtimeType=$(selectContainerRuntime)
+    socketFile=$(getSocket $runtimeType 1)
+    containerRuntime=$(getSocket $runtimeType 2)
+
+    # Compute OS family
+    pm=""
+    osFamily=""
+    case "$DISTRO" in
+        ubuntu|debian)
+            osFamily="debian"
+            pm="apt"
+        ;;
+        centos|rhel)
+            osFamily="redhat"
+            pm="yum"
+        ;;
+        fedora)
+            osFamily="fedora"
+            pm="dnf"
+        ;;
+        opensuse)
+            osFamily="opensuse"
+            pm="zypper"
+        ;;
+        *)
+        echo "Unsupported OS: $ID"
+        exit 1
+        ;;
+    esac
+
+    # Prerequisite : wget
+    which wget &> /dev/null
+    ec=$?
+
+    if [ $ec -gt 0 ]; then
+        # Install wget
+        $pm install wget -y
+    fi
+
+    # Prerequisite : gpg
+    which gpg &> /dev/null
+    ec=$?
+
+    if [ $ec -gt 0 ]; then
+        # Install gpg
+        $pm install gpg -y
+    fi
+
+    # Setup directory
+    setupDir=/tmp/k8s-setup
+    dependenciesDir=/tmp/k8s-setup/dependencies
+
+    if [ ! -d $setupDir ]; then
+        mkdir -p $setupDir
+        mkdir -p $dependenciesDir
+    fi
+
+    # Compute runtime version to be downloaded
+
+    echo -e "\n"
+    echo -e "Setting up K8S with $containerRuntime.....\n"
+    if [ $containerRuntime = "crio" ]; then
+        # [Setup link: https://cri-o.io/]
+
+        echo "Visit the link to see the available versions to use: https://download.opensuse.org/repositories/isv:/cri-o:/stable:/"
+        
+        check=0
+        repoLink=""
+        while [ $check -eq 0 ]; do
+
+            read -p "Please specify the version of CRI-O to be installed (e.g. 1.28): " crioVersion
+
+            containerRuntimeVersion=$crioVersion
+
+            echo "Checking if the CRIO version '$crioVersion' is avaialble for installation...."
+            
+            repoKey="https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key"
+            
+            if [[ $osFamily == "redhat" || $osFamily == "debian" ]]; then
+                wget -O $setupDir/tz $repoKey | &> /dev/null
+                cat $setupDir/tz | grep "ERROR 404" &> /dev/null
+                ec=$?
+
+                if [ $ec -eq 0 ]; then
+                    # Not Found
+                    echo "CRI-O with the version '$crioVersion' is not found, kindly confirm the version specified"
+                else
+                    check=1
+                    echo -e "CRI-O version '$crioVersion' found for installation"
+                fi
+            fi
+        done
+
+        # Begin downloading CRI-O runtime
+        if [ $osFamily == "redhat" ]; then
+
+            # CentOS       
+            
+            # Write CRI-O config below to the file /etc/yum.repos.d/cri-o.repo
+
+                # [cri-o]
+                # name=CRI-O
+                # baseurl=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/$CRIO_VERSION/rpm/
+                # enabled=1
+                # gpgcheck=1
+            
+            printf "[cri-o]\nname=CRI-O\nbaseurl=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/rpm/\nenabled=1\ngpgcheck=1\ngpgkey=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/rpm/repodata/repomd.xml.key\n" | tee /etc/yum.repos.d/cri-o.repo > /dev/null
+            
+            yum update -y
+            yum install -y cri-o
+
+        elif [ $osFamily == "debian" ]; then
+
+            # Set path if not exist
+            createPathIfNotExist "/etc/apt/keyrings"
+
+            curl -fsSL https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/cri-o-apt-keyring.gpg
+
+            echo "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/ /" | tee /etc/apt/sources.list.d/cri-o.list
+
+            apt-get update -y
+            apt-get install -y cri-o 
+
+        fi
+
+        # Enable and start crio service
+        systemctl enable crio
+        systemctl start crio
+
+    elif [ $containerRuntime = "docker" ]; then
+        #_____________________Setup docker___________________________
+
+        if [ $osFamily == "redhat" ]; then
+            repoFile="/etc/yum.repos.d/docker-ce.repo"
+
+            if [ -e $repoFile ]; then
+                sed -i -e 's/baseurl=https:\/\/download\.docker\.com\/linux\/\(fedora\|rhel\)\/$releasever/baseurl\=https:\/\/download.docker.com\/linux\/centos\/$releasever/g' /etc/yum.repos.d/docker-ce.repo
+            else
+                yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+            fi
+
+            yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+            systemctl start docker
+            
+        elif [ $osFamily == "debian" ]; then
+            # Debian installation
+            apt update -y
+            apt install -y docker.io
+        fi
+
+        # Configure containerd
+        if [ ! -d "/etc/containerd/" ]; then
+            mkdir "/etc/containerd/"
+        fi
+
+        containerd config default > /etc/containerd/config.toml
+
+        sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+
+        # Enable containerd service
+        systemctl daemon-reload
+        systemctl enable --now containerd
+        systemctl start containerd
+
+        service containerd start
+
+    elif [ $containerRuntime = "containerd" ]; then
+        #_____________________Setup contianerd_______________________   
+
+        # Check if CR (Container Runtime) is installed
+        which containerd &> /dev/null
+        ec=$?
+
+        if [ $ec -gt 0 ]; then 
+            
+            # Not found
+            downloadContainerd "new" $setupDir $dependenciesDir
+            setupContainerd "new"
+
+        else
+            # Installed
+            installedContainerdVersion=$(containerd --version | cut -d' ' -f3)
+            containerRuntimeVersion=$installedContainerdVersion
+
+            read -p "Your current containerd version is '$installedContainerdVersion', would you like to setup with this version? y/n: " downloadNewVersion
+
+            if [[ $downloadNewVersion = "n" || $downloadNewVersion = "N" ]]; then
+                downloadContainerd "upgrade" $setupDir $dependenciesDir    
+                setupContainerd "upgrade" 
+            else
+                setupContainerd "current" 
+            fi
+
+        fi
+
+    fi
+
+    # Choose kubelet version
+
+    compatiblityDocLink=""
+
+    if [ $containerRuntime = "containerd" ]; then
+        compatiblityDocLink="https://containerd.io/releases/#kubernetes-support"
+    else
+        compatiblityDocLink="https://github.com/cri-o/cri-o?tab=readme-ov-file#compatibility-matrix-cri-o--kubernetes"
+    fi
+
+    echo -e "\nVisit the link (https://github.com/kubernetes/kubernetes/tags) to see the available versions of Kublet to use, and for compatiblity with $containerRuntime version $containerRuntimeVersion see: $compatiblityDocLink \n"
+
+        
     check=0
-    repoLink=""
+    k8sKey=""
+    k8sVersion=""
     while [ $check -eq 0 ]; do
 
-        read -p "Please specify the version of CRI-O to be installed (e.g. 1.28): " crioVersion
-
-        containerRuntimeVersion=$crioVersion
-
-        echo "Checking if the CRIO version '$crioVersion' is avaialble for installation...."
+        read -p "Please specify the version (must be compatible with $containerRuntime v$containerRuntimeVersion) of Kubelet to be installed (Major.Minor only e.g. 1.28): " kubeletVersion
+        echo "Checking if the Kubelet version '$kubeletVersion' is avaialble for installation...."
+            
+        debKeyLink="https://pkgs.k8s.io/core:/stable:/v$kubeletVersion/deb/Release.key"
         
-        repoKey="https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key"
+        rpmKeyLink="https://pkgs.k8s.io/core:/stable:/v$kubeletVersion/rpm/repodata/repomd.xml.key"
+        
+        targetLink=$( [ $osFamily == "redhat" ] && echo $debKeyLink  || echo $rpmKeyLink)
         
         if [[ $osFamily == "redhat" || $osFamily == "debian" ]]; then
-            wget -O $setupDir/tz $repoKey | &> /dev/null
-            cat $setupDir/tz | grep "ERROR 404" &> /dev/null
+            wget -O $setupDir/tz $targetLink | &> /dev/null
+            cat $setupDir/tz | grep "END PGP PUBLIC KEY BLOCK" &> /dev/null
             ec=$?
 
             if [ $ec -eq 0 ]; then
-                # Not Found
-                echo "CRI-O with the version '$crioVersion' is not found, kindly confirm the version specified"
-            else
                 check=1
-                echo -e "CRI-O version '$crioVersion' found for installation"
+                echo -e "Kubelet version '$kubeletVersion' found for installation"
+                k8sKey=$targetLink
+                k8sVersion=$kubeletVersion
+            else
+                # Not Found
+                echo "Kubelet with the version '$kubeletVersion' is not found, kindly confirm the version specified"
             fi
         fi
     done
 
-    # Begin downloading CRI-O runtime
-    if [ $osFamily == "redhat" ]; then
 
-        # CentOS       
-        
-        # Write CRI-O config below to the file /etc/yum.repos.d/cri-o.repo
+    # Disable Swap
+    sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+    swapoff -a
 
-            # [cri-o]
-            # name=CRI-O
-            # baseurl=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/$CRIO_VERSION/rpm/
-            # enabled=1
-            # gpgcheck=1
-        
-        printf "[cri-o]\nname=CRI-O\nbaseurl=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/rpm/\nenabled=1\ngpgcheck=1\ngpgkey=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/rpm/repodata/repomd.xml.key\n" | tee /etc/yum.repos.d/cri-o.repo > /dev/null
-        
-        yum update -y
-        yum install -y cri-o
+    # Update repository
+    $pm update -y
 
-    elif [ $osFamily == "debian" ]; then
+    # Install CRI
+    if [ $containerRuntime != "docker" ]; then 
+        # Setup CRI if docker is not selected for runtime
 
-        # Set path if not exist
-        createPathIfNotExist "/etc/apt/keyrings"
-
-        curl -fsSL https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/cri-o-apt-keyring.gpg
-
-        echo "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v$crioVersion/deb/ /" | tee /etc/apt/sources.list.d/cri-o.list
-
-        apt-get update -y
-        apt-get install -y cri-o 
-
+        #  Install your CRI (Container Runtime Interface), preferred is cri-ctl [https://github.com/kubernetes-sigs/cri-tools/blob/master/docs/crictl.md] 
+        VERSION="v1.28.0" # check latest version in /releases page
+        wget -O $dependenciesDir/crictl-$VERSION-linux-amd64.tar.gz https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-amd64.tar.gz
+        tar -zxvf $dependenciesDir/crictl-$VERSION-linux-amd64.tar.gz -C /usr/local/bin
     fi
 
-    # Enable and start crio service
-    systemctl enable crio
-    systemctl start crio
-
-elif [ $containerRuntime == "docker" ]; then
-    #_____________________Setup docker___________________________
-
-     if [ $osFamily == "redhat" ]; then
-        repoFile="/etc/yum.repos.d/docker-ce.repo"
-
-        if [ -e $repoFile ]; then
-            sed -i -e 's/baseurl=https:\/\/download\.docker\.com\/linux\/\(fedora\|rhel\)\/$releasever/baseurl\=https:\/\/download.docker.com\/linux\/centos\/$releasever/g' /etc/yum.repos.d/docker-ce.repo
-        else
-            yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-        fi
-
-        yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-        systemctl start docker
-        
-    elif [ $osFamily == "debian" ]; then
-        # Debian installation
-        apt update -y
-        apt install -y docker.io
-    fi
-
-    # Configure containerd
-    if [ ! -d "/etc/containerd/" ]; then
-        mkdir "/etc/containerd/"
-    fi
-
-    containerd config default > /etc/containerd/config.toml
-
-    sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
-
-    # Enable containerd service
-    systemctl daemon-reload
-    systemctl enable --now containerd
-    systemctl start containerd
-
-    service containerd start
-
-elif [ $containerRuntime == "containerd" ]; then
-    #_____________________Setup contianerd_______________________   
-
-    # Check if CR (Container Runtime) is installed
-    which containerd &> /dev/null
+    # Setup CM
+    # Check if runc (Container Manager used by container runtime) is installed
+    which runc &> /dev/null
     ec=$?
 
-    if [ $ec -gt 0 ]; then 
-        
+    if [ $ec -eq 1 ]; then 
         # Not found
-        downloadContainerd "new" $setupDir $dependenciesDir
-        setupContainerd "new"
+        # Install runc  (Container Manager used by container runtime)
+        wget -O $dependenciesDir/runc.amd64 https://github.com/opencontainers/runc/releases/download/v1.1.9/runc.amd64
+        install -m 755 $dependenciesDir/runc.amd64 /usr/local/sbin/runc
+    fi
 
-    else
-        # Installed
-        installedContainerdVersion=$(containerd --version | cut -d' ' -f3)
-        containerRuntimeVersion=$installedContainerdVersion
 
-        read -p "Your current containerd version is '$installedContainerdVersion', would you like to setup with this version? y/n: " downloadNewVersion
+    # REGISTER CRI endpoints [to fix access issue e.g running crictl ps]
+    # Write to the file '/etc/crictl.yaml' the below contents
+    # runtime-endpoint: $socketFile
+    # image-endpoint: $socketFile
+    # timeout: 2
+    # debug: false
+    # pull-image-on-create: false
+    printf "runtime-endpoint: $socketFile\nimage-endpoint: $socketFile\ntimeout: 2\ndebug: false\npull-image-on-create: false" | tee /etc/crictl.yaml > /dev/null
 
-        if [[ $downloadNewVersion = "n" || $downloadNewVersion = "N" ]]; then
-            downloadContainerd "upgrade" $setupDir $dependenciesDir    
-            setupContainerd "upgrade" 
-        else
-            setupContainerd "current" 
-        fi
+
+    # Forwarding IPv4 and letting iptables see bridged traffic [https://kubernetes.io/docs/setup/production-environment/container-runtimes/#forwarding-ipv4-and-letting-iptables-see-bridged-traffic]
+    # Write to the file '/etc/modules-load.d/k8s.conf' the below contents
+    # overlay
+    # br_netfilter
+    printf "overlay\nbr_netfilter\n" | tee /etc/modules-load.d/k8s.conf
+
+    # > sysctl params required by setup, params persist across reboots
+    # Write to the file '/etc/sysctl.d/k8s.conf' the below contents
+    # net.bridge.bridge-nf-call-iptables  = 1
+    # net.bridge.bridge-nf-call-ip6tables = 1
+    # net.ipv4.ip_forward                 = 1
+    printf "net.bridge.bridge-nf-call-iptables  = 1\nnet.bridge.bridge-nf-call-ip6tables = 1\nnet.ipv4.ip_forward                 = 1\n" | tee /etc/sysctl.d/k8s.conf
+    
+
+    modprobe overlay
+    modprobe br_netfilter
+
+
+    # Disable SELINUX for Redhat
+    if [ -f "/etc/selinux/config" ]; then
+        # Set SELINUX=disabled 
+        sed -i 's/\(SELINUX=\).*/\1disabled/' /etc/selinux/config
+        setenforce 0
+    fi
+
+    # > Apply sysctl params without reboot
+    sysctl --system
+
+    # Install KubeADM, Kublet and Kubectl
+    if [ $osFamily = "debian"  ]; then
+
+        apt update -y
+
+        # Install dependencies for CoreDNS
+        apt install -y apt-transport-https ca-certificates curl #
+
+        # Set path if not exist
+        createPathIfNotExist "/etc/apt/keyrings/"
+
+        # Install kubectl, kubelet and kubeadm
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v$k8sVersion/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v$k8sVersion/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+        apt update -y
+        apt install -y kubelet kubeadm kubectl
+        apt-mark hold kubelet kubeadm kubectl
+
+    elif [ $osFamily = "redhat" ]; then 
+
+        # This overwrites any existing configuration in /etc/yum.repos.d/kubernetes.repo
+        echo "[kubernetes]"     >> /etc/yum.repos.d/kubernetes.repo
+        echo "name=Kubernetes"  >> /etc/yum.repos.d/kubernetes.repo
+        echo "baseurl=https://pkgs.k8s.io/core:/stable:/v$k8sVersion/rpm/" >> /etc/yum.repos.d/kubernetes.repo
+        echo "enabled=1" >> /etc/yum.repos.d/kubernetes.repo
+        echo "gpgcheck=1" >> /etc/yum.repos.d/kubernetes.repo
+        echo "gpgkey=https://pkgs.k8s.io/core:/stable:/v$k8sVersion/rpm/repodata/repomd.xml.key" >> /etc/yum.repos.d/kubernetes.repo
+
+        yum install yum-utils ca-certificates curl
+        dnf install dnf-plugins-core &> /dev/null
+
+        yum install -y kubeadm kubelet kubectl
 
     fi
 
-fi
 
-# Choose kubelet version
+    # Pull required containers
+    kubeadm config images pull --cri-socket="$socketFile"
 
-compatiblityDocLink=""
+    sleep 20s
 
-if [ $containerRuntime = "containerd" ]; then
-    compatiblityDocLink="https://containerd.io/releases/#kubernetes-support"
-else
-    compatiblityDocLink="https://github.com/cri-o/cri-o?tab=readme-ov-file#compatibility-matrix-cri-o--kubernetes"
-fi
+    systemctl enable kubelet
+    systemctl start kubelet
 
-echo -e "\nVisit the link (https://github.com/kubernetes/kubernetes/tags) to see the available versions of Kublet to use, and for compatiblity with $containerRuntime version $containerRuntimeVersion see: $compatiblityDocLink \n"
+    if [[ $setupType = "1"  && $entSelectedOpt = "1" ]]; then
 
-    
-check=0
-k8sKey=""
-k8sVersion=""
-while [ $check -eq 0 ]; do
+        # initialize the master node control plane configurations: (Master node)
+        IPADDR=$privateIP
+        POD_CIDR="10.244.0.0/16"
 
-    read -p "Please specify the version (must be compatible with $containerRuntime v$containerRuntimeVersion) of Kubelet to be installed (Major.Minor only e.g. 1.28): " kubeletVersion
-    echo "Checking if the Kubelet version '$kubeletVersion' is avaialble for installation...."
+        initializeCluster $IPADDR $socketFile
         
-    debKeyLink="https://pkgs.k8s.io/core:/stable:/v$kubeletVersion/deb/Release.key"
-    
-    rpmKeyLink="https://pkgs.k8s.io/core:/stable:/v$kubeletVersion/rpm/repodata/repomd.xml.key"
-    
-    targetLink=$( [ $osFamily == "redhat" ] && echo $debKeyLink  || echo $rpmKeyLink)
-    
-    if [[ $osFamily == "redhat" || $osFamily == "debian" ]]; then
-        wget -O $setupDir/tz $targetLink | &> /dev/null
-        cat $setupDir/tz | grep "END PGP PUBLIC KEY BLOCK" &> /dev/null
-        ec=$?
-
-        if [ $ec -eq 0 ]; then
-            check=1
-            echo -e "Kubelet version '$kubeletVersion' found for installation"
-            k8sKey=$targetLink
-            k8sVersion=$kubeletVersion
-        else
-            # Not Found
-            echo "Kubelet with the version '$kubeletVersion' is not found, kindly confirm the version specified"
-        fi
     fi
-done
+}
+function selectContainerRuntime(){
+    prompt1=${1:- "Please select your preferred container runtime: "}
+    prompt2=${2:- "Please select a valid option for the container runtime type to be used for the setup: "}
 
 
-# Disable Swap
-sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
-swapoff -a
 
-# Update repository
-$pm update -y
+    PS3=$prompt1
+    containerRuntimeType=("Containerd" "Containerd with Docker (Not stable yet)" "CRI-O")
+    crtSelectedOpt=0
 
-# Install CRI
-if [ $containerRuntime != "docker" ]; then 
-    # Setup CRI if docker is not selected for runtime
+    select res in "${containerRuntimeType[@]}"; do
+        crtSelectedOpt=$((REPLY))
+        while [ $crtSelectedOpt -gt 3 ]; do
+            PS3=$prompt2
+            select res in "${containerRuntimeType[@]}"; do
+                crtSelectedOpt=$((REPLY))
+                break
+            done
+        done
+        break
+    done
 
-    #  Install your CRI (Container Runtime Interface), preferred is cri-ctl [https://github.com/kubernetes-sigs/cri-tools/blob/master/docs/crictl.md] 
-    VERSION="v1.28.0" # check latest version in /releases page
-    wget -O $dependenciesDir/crictl-$VERSION-linux-amd64.tar.gz https://github.com/kubernetes-sigs/cri-tools/releases/download/$VERSION/crictl-$VERSION-linux-amd64.tar.gz
-    tar -zxvf $dependenciesDir/crictl-$VERSION-linux-amd64.tar.gz -C /usr/local/bin
-fi
+    echo $crtSelectedOpt
 
-# Setup CM
-# Check if runc (Container Manager used by container runtime) is installed
-which runc &> /dev/null
-ec=$?
-
-if [ $ec -eq 1 ]; then 
-    # Not found
-    # Install runc  (Container Manager used by container runtime)
-    wget -O $dependenciesDir/runc.amd64 https://github.com/opencontainers/runc/releases/download/v1.1.9/runc.amd64
-    install -m 755 $dependenciesDir/runc.amd64 /usr/local/sbin/runc
-fi
-
-
-# REGISTER CRI endpoints [to fix access issue e.g running crictl ps]
-cat <<EOF | tee /etc/crictl.yaml
-runtime-endpoint: $socketFile
-image-endpoint: $socketFile
-timeout: 2
-debug: false
-pull-image-on-create: false
-EOF
-
-
-# Forwarding IPv4 and letting iptables see bridged traffic [https://kubernetes.io/docs/setup/production-environment/container-runtimes/#forwarding-ipv4-and-letting-iptables-see-bridged-traffic]
-cat <<EOF | tee /etc/modules-load.d/k8s.conf
-overlay
-br_netfilter
-EOF
-
-modprobe overlay
-modprobe br_netfilter
-
-# > sysctl params required by setup, params persist across reboots
-cat <<EOF | tee /etc/sysctl.d/k8s.conf
-net.bridge.bridge-nf-call-iptables  = 1
-net.bridge.bridge-nf-call-ip6tables = 1
-net.ipv4.ip_forward                 = 1
-EOF
-
-# Disable SELINUX for Redhat
-if [ -f "/etc/selinux/config" ]; then
-    # Set SELINUX=disabled 
-    sed -i 's/\(SELINUX=\).*/\1disabled/' /etc/selinux/config
-    setenforce 0
-fi
-
-# > Apply sysctl params without reboot
-sysctl --system
-
-# Install KubeADM, Kublet and Kubectl
-if [ $osFamily == "debian"  ]; then
-
-    apt update -y
-
-    # Install dependencies for CoreDNS
-    apt install -y apt-transport-https ca-certificates curl #
-
-    # Set path if not exist
-    createPathIfNotExist "/etc/apt/keyrings/"
-
-    # Install kubectl, kubelet and kubeadm
-    curl -fsSL https://pkgs.k8s.io/core:/stable:/v$k8sVersion/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v$k8sVersion/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
-    apt update -y
-    apt install -y kubelet kubeadm kubectl
-    apt-mark hold kubelet kubeadm kubectl
-
-elif [ $osFamily == "redhat" ]; then 
-
-    # This overwrites any existing configuration in /etc/yum.repos.d/kubernetes.repo
-    echo "[kubernetes]"     >> /etc/yum.repos.d/kubernetes.repo
-    echo "name=Kubernetes"  >> /etc/yum.repos.d/kubernetes.repo
-    echo "baseurl=https://pkgs.k8s.io/core:/stable:/v$k8sVersion/rpm/" >> /etc/yum.repos.d/kubernetes.repo
-    echo "enabled=1" >> /etc/yum.repos.d/kubernetes.repo
-    echo "gpgcheck=1" >> /etc/yum.repos.d/kubernetes.repo
-    echo "gpgkey=https://pkgs.k8s.io/core:/stable:/v$k8sVersion/rpm/repodata/repomd.xml.key" >> /etc/yum.repos.d/kubernetes.repo
-
-    yum install yum-utils ca-certificates curl
-    dnf install dnf-plugins-core &> /dev/null
-
-    yum install -y kubeadm kubelet kubectl
-
-fi
-
-
-# Pull required containers
-kubeadm config images pull --cri-socket="$socketFile"
-
-sleep 20s
-
-systemctl enable kubelet
-systemctl start kubelet
-
-if [ $entSelectedOpt == "1" ]; then
-
-    # initialize the master node control plane configurations: (Master node)
-    IPADDR=$privateIP
+}
+function initializeCluster(){
+    local IPADDR=$1
+    local socketFile=$2
     POD_CIDR="10.244.0.0/16"
 
     echo -e "\nInitializing the control plane...."
@@ -641,21 +673,92 @@ if [ $entSelectedOpt == "1" ]; then
                 res=1
             done
 
+            which helm &> /dev/null
+            ec=$?
+
+            if [ $ec -eq 0 ]; then
+                # Installed helm
+                echo -e "\nPost operation completed successfully...\n"
+            else
+                # Installation failed helm
+                echo -e "\nPost operation failed... Try installing helm manually\n"
+            fi
         fi
-
-        which helm &> /dev/null
-        ec=$?
-
-        if [ $ec -eq 0 ]; then
-            # Installed helm
-            echo -e "\nPost operation completed successfully...\n"
-        else
-            # Installation failed helm
-            echo -e "\nPost operation failed... Try installing helm manually\n"
-        fi
-
     else
         echo -e "There was a problem initiating the control plane"
     fi
+}
+# ______________Functions Definitions Ends_____________
 
+
+if [ -f /etc/os-release ]; then
+    source /etc/os-release
+    OS_NAME=$NAME
+    VERSION=$VERSION_ID
+    DISTRO=$ID
+fi
+
+PS3="What would you like to do?: "
+taskTypes=("Setup K8S Only" "Setup K8S and Initialize cluster" "Reset cluster" "Initialize cluster")
+entSelectedOpt=0
+
+select res in "${taskTypes[@]}"; do
+    entSelectedOpt=$((REPLY))
+    while [ $entSelectedOpt -gt 4 ]; do
+        PS3="Please select a valid option for your task type: "
+        select res in "${taskTypes[@]}"; do
+            entSelectedOpt=$((REPLY))
+            break
+        done
+    done
+    break
+done
+
+if [ $entSelectedOpt -eq 1 ]; then
+    # Setup K8S only 
+    echo -e "\nYou are in K8S setup only mode\n"
+    setupK8s
+elif [ $entSelectedOpt -eq 2 ]; then
+    # Setup K8S and Initialize cluster
+    echo -e "\nYou are in K8S setup and initialization mode\n"
+    setupK8s 1
+elif [ $entSelectedOpt -eq 3 ]; then
+    # Reset cluster
+    echo -e "\nYou are in cluster reset mode\n"
+    runtimeType=$(selectContainerRuntime "Please select the container runtime that the cluster was initialized with: " "The selected option is invalid, please select the container runtime that the cluster was initialized with: ")
+    socketFile=$(getSocket $runtimeType 1)
+    echo -e "\nExecuting cluster reset....."
+    kubeadm reset --cri-socket=$socketFile -f > /dev/null
+
+    echo -e "Executing files clean up...."
+
+    if [ -d "/etc/cni/net.d" ]; then
+        rm -fr /etc/cni/net.d
+    fi
+    
+    if [ -d "/etc/kubernetes" ]; then
+        rm -fr /etc/kubernetes
+    fi
+
+    if [ -d "$HOME/.kube" ]; then
+        rm -fr $HOME/.kube
+    fi
+
+    echo -e "Restarting Kubelet...."
+    systemctl restart kubelet
+
+    echo -e "Cluster reset successfully!\n"
+
+else
+    # Initialize cluster
+    # Reset cluster
+    echo -e "\nYou are in cluster initialization mode\n"
+    read -p "Please specify the server private IP address: " privateIP
+
+    runtimeType=$(selectContainerRuntime "Please select the container runtime to initialize the cluster with: " "The selected option is invalid, please select the container runtime to initialize the cluster with: ")
+    socketFile=$(getSocket $runtimeType 1)
+    k8sRuntime=$(getSocket $runtimeType 2)
+
+    initializeCluster $privateIP $socketFile
+    systemctl restart $k8sRuntime
 fi
