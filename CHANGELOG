@@ -1,3 +1,13 @@
+v2.2.0
+	- Fixed issue of prompting for IP address when setting up Worker node
+	- Fixed issue with reprompting for Helm version, when hiting ENTER for default version
+	- Fixed issue with Cloud repo taking priority, and causing unintended version of kubelet to be installed
+	- Fixed issue with untainting master node when on CLuster initilaization mode
+	- Fixed issue with Helm installation failure due to invalid path
+	- Added option to choose between untainting and tainting the master node
+	- Added option to allow joining a worker node to cluster
+	- Added option to initialize cluster with public IP address
+
 v2.1.0
 	- Added option to reset cluster
 	- Added option to initialize cluster only

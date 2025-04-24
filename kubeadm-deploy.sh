@@ -5,6 +5,9 @@ VERSION=""
 DISTRO=""
 socketFile=""
 containerRuntimeVersion=""
+# Setup directory
+setupDir=/tmp/k8s-setup
+dependenciesDir=/tmp/k8s-setup/dependencies
 
 # ______________Functions Definitions Starts___________
 function createPathIfNotExist() {
@@ -111,7 +114,7 @@ function downloadHelm() {
             # No version specified, use default version
             HelmVersion="3.7.2"
             repoLink="https://get.helm.sh/helm-v$HelmVersion-linux-amd64.tar.gz"
-
+            check=1
         fi
     done
 
@@ -218,6 +221,7 @@ function setupK8s(){
     PS3="Please select the environment node type: "
     envNodeType=("Master" "Worker")
     entSelectedOpt=0
+    intializeCluster=0
 
     select res in "${envNodeType[@]}"; do
         entSelectedOpt=$((REPLY))
@@ -238,10 +242,16 @@ function setupK8s(){
     disabledFirewall firewalld
     echo  "Firewall check completed successfully!"
 
+    if [[ $setupType = "1"  && $entSelectedOpt = "1" ]]; then
 
-    echo -e "\n"
-    read -p "Please specify the server private IP address: " privateIP
-    echo -e "\n"
+        echo -e "\n"
+        read -p "Please specify the server private IP address: " privateIP
+        read -p "Please specify this server's public IP address, for accesibility over the internet. To skip press ENTER: " publicIP
+        echo -e "\n"
+        intializeCluster=1
+
+    fi
+   
 
     server_name=$(hostname)
     server_name=${server_name,,} 
@@ -296,10 +306,6 @@ function setupK8s(){
         # Install gpg
         $pm install gpg -y
     fi
-
-    # Setup directory
-    setupDir=/tmp/k8s-setup
-    dependenciesDir=/tmp/k8s-setup/dependencies
 
     if [ ! -d $setupDir ]; then
         mkdir -p $setupDir
@@ -575,8 +581,8 @@ function setupK8s(){
         curl -fsSL https://pkgs.k8s.io/core:/stable:/v$k8sVersion/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v$k8sVersion/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
         apt update -y
-        apt install -y kubelet kubeadm kubectl
-        apt-mark hold kubelet kubeadm kubectl
+
+        computeClusterVersionAndInstall "apt" $k8sVersion
 
     elif [ $osFamily = "redhat" ]; then 
 
@@ -591,7 +597,7 @@ function setupK8s(){
         yum install yum-utils ca-certificates curl
         dnf install dnf-plugins-core &> /dev/null
 
-        yum install -y kubeadm kubelet kubectl
+        computeClusterVersionAndInstall "yum" $k8sVersion
 
     fi
 
@@ -604,21 +610,27 @@ function setupK8s(){
     systemctl enable kubelet
     systemctl start kubelet
 
-    if [[ $setupType = "1"  && $entSelectedOpt = "1" ]]; then
+    if [ $intializeCluster -eq 1 ]; then
 
         # initialize the master node control plane configurations: (Master node)
         IPADDR=$privateIP
         POD_CIDR="10.244.0.0/16"
 
-        initializeCluster $IPADDR $socketFile
+        initializeCluster $IPADDR $socketFile $publicIP
+
+    else
+        # Worker node
+
+        echo -e "K8s setup on worker completed successfully"
+        echo "Initiating Joining Worker to existing cluster...."
+
+        joinWorkerToCluster
         
     fi
 }
 function selectContainerRuntime(){
     prompt1=${1:- "Please select your preferred container runtime: "}
     prompt2=${2:- "Please select a valid option for the container runtime type to be used for the setup: "}
-
-
 
     PS3=$prompt1
     containerRuntimeType=("Containerd" "Containerd with Docker (Not stable yet)" "CRI-O")
@@ -639,13 +651,34 @@ function selectContainerRuntime(){
     echo $crtSelectedOpt
 
 }
+function computeClusterVersionAndInstall(){
+    distro=$1
+    K8S_VERSION_MINOR=$2
+
+    if [ $distro = "apt" ];then
+        VERSION=$(apt-cache madison kubelet | grep ${K8S_VERSION_MINOR} | head -n1 | awk '{print $3}')
+        apt-get install -y kubelet=${VERSION} kubeadm=${VERSION} kubectl=${VERSION}
+        apt-mark hold kubelet kubeadm kubectl
+    elif [ $distro = "yum" ]; then
+        VERSION=$(yum --showduplicates list kubelet | grep ${K8S_VERSION_MINOR} | head -n1 | awk '{print $2}')
+        yum install -y kubelet-${VERSION} kubeadm-${VERSION} kubectl-${VERSION}
+    fi
+}
 function initializeCluster(){
     local IPADDR=$1
     local socketFile=$2
+    local publicIP=$3
+
     POD_CIDR="10.244.0.0/16"
 
+    if [ ${#publicIP} -gt 0 ];then
+        # has public IP
+        param="--apiserver-cert-extra-sans=$publicIP --control-plane-endpoint=$publicIP:6443"
+    fi
+
     echo -e "\nInitializing the control plane...."
-    kubeadm init --apiserver-advertise-address=$IPADDR --pod-network-cidr=$POD_CIDR --cri-socket=$socketFile > worker_node_token.txt
+ 
+    kubeadm init --apiserver-advertise-address=$IPADDR $param --pod-network-cidr=$POD_CIDR --cri-socket=$socketFile > worker_node_token.txt
     cat worker_node_token.txt | grep "initialized successfully!"
     ec=$?
     if [ $ec -eq 0 ]; then
@@ -661,7 +694,16 @@ function initializeCluster(){
         echo -e "\nSetting up CNI with Flannel"
         kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
 
-        kubectl taint node $server_name node-role.kubernetes.io/control-plane:NoSchedule-
+        echo -e "\n"
+        # Request to Untaint the master node
+        read -p "Would you like to untaint this master node (Y/N)?: " untaintNode
+
+        if [[ $untaintNode = "y" || $untaintNode = "Y" ]]; then
+            server_name=$(hostname)
+            server_name=${server_name,,} 
+            echo -e "Untainting master node....."
+            kubectl taint node $server_name node-role.kubernetes.io/control-plane:NoSchedule-
+        fi
 
         # Install Helm and run on the master node only
         read -p "Would you like to setup Helm repo manager for this cluster (Y/N)?: " setupHelm
@@ -688,6 +730,22 @@ function initializeCluster(){
         echo -e "There was a problem initiating the control plane"
     fi
 }
+function joinWorkerToCluster(){
+
+    echo -e "\n"
+    read -p "Please specify the master node reachable IP address: " reachableIP
+    
+    read -p "Please specify the token value: " tokenValue
+    read -p "Please specify the token hash (begining with sha256:xxxx): " tokenHash
+    echo -e "\n"
+
+    local containerRuntime=$(selectContainerRuntime)
+
+    local socketFile=$(getSocket $containerRuntime 1)
+    echo -e "\n"
+    
+    kubeadm join "$reachableIP:6443" --token "$tokenValue" --discovery-token-ca-cert-hash "$tokenHash" --cri-socket="$socketFile"
+}
 # ______________Functions Definitions Ends_____________
 
 
@@ -699,12 +757,12 @@ if [ -f /etc/os-release ]; then
 fi
 
 PS3="What would you like to do?: "
-taskTypes=("Setup K8S Only" "Setup K8S and Initialize cluster" "Reset cluster" "Initialize cluster")
+taskTypes=("Setup K8S Only" "Setup K8S and Initialize/join cluster" "Reset cluster" "Initialize cluster" "Join Worker node to Cluster")
 entSelectedOpt=0
 
 select res in "${taskTypes[@]}"; do
     entSelectedOpt=$((REPLY))
-    while [ $entSelectedOpt -gt 4 ]; do
+    while [ $entSelectedOpt -gt 5 ]; do
         PS3="Please select a valid option for your task type: "
         select res in "${taskTypes[@]}"; do
             entSelectedOpt=$((REPLY))
@@ -728,7 +786,7 @@ elif [ $entSelectedOpt -eq 3 ]; then
     runtimeType=$(selectContainerRuntime "Please select the container runtime that the cluster was initialized with: " "The selected option is invalid, please select the container runtime that the cluster was initialized with: ")
     socketFile=$(getSocket $runtimeType 1)
     echo -e "\nExecuting cluster reset....."
-    kubeadm reset --cri-socket=$socketFile -f > /dev/null
+    kubeadm reset --cri-socket=$socketFile -f &> /dev/null
 
     echo -e "Executing files clean up...."
 
@@ -749,16 +807,23 @@ elif [ $entSelectedOpt -eq 3 ]; then
 
     echo -e "Cluster reset successfully!\n"
 
-else
+elif [ $entSelectedOpt -eq 4 ]; then
+
     # Initialize cluster
     # Reset cluster
     echo -e "\nYou are in cluster initialization mode\n"
-    read -p "Please specify the server private IP address: " privateIP
+    read -p "Please specify this server's private IP address: " privateIP
+    read -p "Please specify this server's public IP address, for accesibility over the internet. To skip press ENTER: " publicIP
 
     runtimeType=$(selectContainerRuntime "Please select the container runtime to initialize the cluster with: " "The selected option is invalid, please select the container runtime to initialize the cluster with: ")
     socketFile=$(getSocket $runtimeType 1)
     k8sRuntime=$(getSocket $runtimeType 2)
 
-    initializeCluster $privateIP $socketFile
+    initializeCluster $privateIP $socketFile $publicIP
     systemctl restart $k8sRuntime
+
+elif [ $entSelectedOpt -eq 5 ]; then
+    # Join worker node to cluster
+    joinWorkerToCluster
+
 fi
