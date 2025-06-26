@@ -1,3 +1,8 @@
+v2.2.1
+	- Fixed Typo issue
+	- Fixed issue with k8s setup when in K8s setup only mode
+	- Optimised the task prompt to be more precise
+
 v2.2.0
 	- Fixed issue of prompting for IP address when setting up Worker node
 	- Fixed issue with reprompting for Helm version, when hiting ENTER for default version

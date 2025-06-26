@@ -222,16 +222,26 @@ function setupK8s(){
     envNodeType=("Master" "Worker")
     entSelectedOpt=0
     intializeCluster=0
+    selectedNode=""
 
     select res in "${envNodeType[@]}"; do
         entSelectedOpt=$((REPLY))
+        
         while [ $entSelectedOpt -gt 2 ]; do
-            PS3="Please select a valid option for the environemnt node type: "
+            PS3="Please select a valid option for the environment node type: "
             select res in "${envNodeType[@]}"; do
                 entSelectedOpt=$((REPLY))
                 break
             done
         done
+        
+        # Set selection
+        if [ $entSelectedOpt = "1" ]; then
+            selectedNode="master"
+        else
+            selectedNode="worker"
+        fi
+
         break
     done
 
@@ -243,13 +253,12 @@ function setupK8s(){
     echo  "Firewall check completed successfully!"
 
     if [[ $setupType = "1"  && $entSelectedOpt = "1" ]]; then
-
+        # setupType 1 = setup and initialize, entSelectedOpt 1 = master
         echo -e "\n"
         read -p "Please specify the server private IP address: " privateIP
         read -p "Please specify this server's public IP address, for accesibility over the internet. To skip press ENTER: " publicIP
         echo -e "\n"
         intializeCluster=1
-
     fi
    
 
@@ -618,14 +627,14 @@ function setupK8s(){
 
         initializeCluster $IPADDR $socketFile $publicIP
 
-    else
-        # Worker node
-
+    elif [[ $setupType = "1"  && $selectedNode = "worker" ]]; then
+        
+        # Worker node with join option
         echo -e "K8s setup on worker completed successfully"
         echo "Initiating Joining Worker to existing cluster...."
-
         joinWorkerToCluster
-        
+    elif [ $setupType = "2" ]; then
+         echo -e "\nK8s setup on $selectedNode node completed successfully.... Initialize your cluster when ready\n"
     fi
 }
 function selectContainerRuntime(){
@@ -757,7 +766,7 @@ if [ -f /etc/os-release ]; then
 fi
 
 PS3="What would you like to do?: "
-taskTypes=("Setup K8S Only" "Setup K8S and Initialize/join cluster" "Reset cluster" "Initialize cluster" "Join Worker node to Cluster")
+taskTypes=("Setup K8S components only" "Setup K8S components and Initialize/Join cluster" "Reset cluster" "Initialize cluster" "Join Worker node to Cluster")
 entSelectedOpt=0
 
 select res in "${taskTypes[@]}"; do
@@ -775,10 +784,10 @@ done
 if [ $entSelectedOpt -eq 1 ]; then
     # Setup K8S only 
     echo -e "\nYou are in K8S setup only mode\n"
-    setupK8s
+    setupK8s 2
 elif [ $entSelectedOpt -eq 2 ]; then
     # Setup K8S and Initialize cluster
-    echo -e "\nYou are in K8S setup and initialization mode\n"
+    echo -e "\nYou are in K8S setup and initialization/join mode\n"
     setupK8s 1
 elif [ $entSelectedOpt -eq 3 ]; then
     # Reset cluster
@@ -823,6 +832,7 @@ elif [ $entSelectedOpt -eq 4 ]; then
     systemctl restart $k8sRuntime
 
 elif [ $entSelectedOpt -eq 5 ]; then
+
     # Join worker node to cluster
     joinWorkerToCluster
 
