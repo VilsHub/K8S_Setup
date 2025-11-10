@@ -1,3 +1,8 @@
+v2.2.2
+	- Fixed Typo issue
+	- Optimised the k8s task prompt to be more precise
+	- Fixed another issue with Cloud repo taking priority, and causing unintended version of kubelet to be installed or not found
+
 v2.2.1
 	- Fixed Typo issue
 	- Fixed issue with k8s setup when in K8s setup only mode

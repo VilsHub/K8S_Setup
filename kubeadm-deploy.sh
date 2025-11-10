@@ -449,7 +449,7 @@ function setupK8s(){
             installedContainerdVersion=$(containerd --version | cut -d' ' -f3)
             containerRuntimeVersion=$installedContainerdVersion
 
-            read -p "Your current containerd version is '$installedContainerdVersion', would you like to setup with this version? y/n: " downloadNewVersion
+            read -p "Your current containerd version is '$installedContainerdVersion', would you like to setup with this version, press "ENTER" or "y" for yes, and "n" for No, y/ENTER/n: " downloadNewVersion
 
             if [[ $downloadNewVersion = "n" || $downloadNewVersion = "N" ]]; then
                 downloadContainerd "upgrade" $setupDir $dependenciesDir    
@@ -472,7 +472,7 @@ function setupK8s(){
         compatiblityDocLink="https://github.com/cri-o/cri-o?tab=readme-ov-file#compatibility-matrix-cri-o--kubernetes"
     fi
 
-    echo -e "\nVisit the link (https://github.com/kubernetes/kubernetes/tags) to see the available versions of Kublet to use, and for compatiblity with $containerRuntime version $containerRuntimeVersion see: $compatiblityDocLink \n"
+    echo -e "\nVisit the link (https://github.com/kubernetes/kubernetes/tags) to see the available versions of Kubelet to use, and for compatiblity with $containerRuntime version $containerRuntimeVersion see: $compatiblityDocLink \n"
 
         
     check=0
@@ -575,7 +575,7 @@ function setupK8s(){
     # > Apply sysctl params without reboot
     sysctl --system
 
-    # Install KubeADM, Kublet and Kubectl
+    # Install KubeADM, Kubelet and Kubectl
     if [ $osFamily = "debian"  ]; then
 
         apt update -y
@@ -664,13 +664,43 @@ function computeClusterVersionAndInstall(){
     distro=$1
     K8S_VERSION_MINOR=$2
 
-    if [ $distro = "apt" ];then
-        VERSION=$(apt-cache madison kubelet | grep ${K8S_VERSION_MINOR} | head -n1 | awk '{print $3}')
-        apt-get install -y kubelet=${VERSION} kubeadm=${VERSION} kubectl=${VERSION}
+    if [ "$distro" = "apt" ]; then
+        # List all versions of kubelet
+        ALL_VERSIONS=$(apt list -a kubelet 2>/dev/null)
+
+        # Official repo first
+        LATEST=$(echo "$ALL_VERSIONS" \
+                | awk -v ver="$K8S_VERSION_MINOR" '$1 ~ /unknown/ && $2 ~ ("^" ver) {print $2}' \
+                | sort -V \
+                | tail -n1)
+
+        # Fallback if official repo not found
+        if [ -z "$LATEST" ]; then
+            LATEST=$(echo "$ALL_VERSIONS" \
+                    | awk -v ver="$K8S_VERSION_MINOR" '$2 ~ ("^" ver) {print $2}' \
+                    | sort -V \
+                    | tail -n1)
+        fi
+        echo "Installing Kubernetes version: $LATEST"
+
+        apt install -y kubelet="$LATEST" kubeadm="$LATEST" kubectl="$LATEST"
         apt-mark hold kubelet kubeadm kubectl
-    elif [ $distro = "yum" ]; then
-        VERSION=$(yum --showduplicates list kubelet | grep ${K8S_VERSION_MINOR} | head -n1 | awk '{print $2}')
-        yum install -y kubelet-${VERSION} kubeadm-${VERSION} kubectl-${VERSION}
+    elif [ "$distro" = "yum" ]; then
+        ALL_VERSIONS=$(yum --showduplicates list kubelet 2>/dev/null | awk '{print $2}')
+
+        # Official repo first (assuming the repo name contains 'kube' or similar)
+        LATEST=$(yum --showduplicates list kubelet 2>/dev/null \
+                | awk -v ver="$K8S_VERSION_MINOR" '$2 ~ ("^" ver) && $1 ~ /kube/ {print $2}' \
+                | sort -V \
+                | tail -n1)
+
+        # Fallback if official repo not found
+        if [ -z "$LATEST" ]; then
+            LATEST=$(echo "$ALL_VERSIONS" | awk -v ver="$K8S_VERSION_MINOR" '$1 ~ ("^" ver)' | sort -V | tail -n1)
+        fi
+
+        echo "Installing Kubernetes version: $LATEST"
+        yum install -y kubelet-$LATEST kubeadm-$LATEST kubectl-$LATEST
     fi
 }
 function initializeCluster(){
