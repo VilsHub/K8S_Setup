@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-upgrade-agent
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: kube-upgrade-agent
+  template:
+    metadata:
+      labels:
+        app: kube-upgrade-agent
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: control-plane-active
+                operator: DoesNotExist
+      serviceAccountName: kube-upgrade-agent
+      hostPID: true
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: agent
+        image: vilshub/kube-upgrade-agent:1.0.0
+        command:
+          - uvicorn
+          - agent:app
+          - --host
+          - 0.0.0.0
+          - --port
+          - "8080"
+        securityContext:
+          runAsUser: 1001
+          runAsGroup: 1001
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: k8s-tool
+          mountPath: /host-scripts/k8s/tool
+          readOnly: false
+      volumes:
+      - name: k8s-tool
+        hostPath:
+          path: /k8s/tool
+          type: DirectoryOrCreate
+
+      # --- Init container: installer runs as root ---
+      initContainers:
+        - name: kube-installer
+          image: vilshub/kube-upgrade-agent:1.0.0
+          command:
+            - /bin/sh
+            - -c 
+            - | 
+              set -e
+              cp /opt/kube-installer/install.sh /host-scripts/k8s/tool/install.sh
+              cp /opt/kube-installer/kube-upgrade.sh /host-scripts/k8s/tool/kube-upgrade.sh
+              chmod 700 /host-scripts/k8s/tool/*.sh
+              chmod -R a+rw /host-scripts/k8s
+              nsenter --target 1 --mount --pid -- bash /k8s/tool/install.sh
+          securityContext:
+            runAsUser: 0            # run as root to install service
+            privileged: true
+          volumeMounts:
+            - name: k8s-tool
+              mountPath: /host-scripts/k8s/tool
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-upgrade-agent
+  namespace: kube-system
+spec:
+  clusterIP: None
+  type: ClusterIP
+  selector:
+    app: kube-upgrade-agent
+  ports:
+    - port: 8080  # service port
+      targetPort: 8080
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-upgrade-agent
+  namespace: kube-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-upgrade-agent-role
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-upgrade-agent-binding
+subjects:
+  - kind: ServiceAccount
+    name: kube-upgrade-agent
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: kube-upgrade-agent-role
+  apiGroup: rbac.authorization.k8s.io
