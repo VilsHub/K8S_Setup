@@ -956,13 +956,13 @@ function endProgress(){
 
     # Restore cursor
     tput cnorm
-    status=$( [ $processState == "f" ] && echo "❌"  || echo "✅" )
-    printf "\r%s..... done %s\n" "$endMsg" "$status"
+    status=$( [ $processState == "f" ] && echo "completed but unsuccessful ❌"  || echo "done ✅" )
+    printf "\r%s..... %s\n" "$endMsg" "$status"
     echo ""
 }
 function computeClusterNodes(){
     # Check if master
-    [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && { exit 1; }
+    [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && { return; }
 
     # Get cluster version
     nodeVersion=$(kubelet --version | awk '{print $2}' | sed 's/^v//' | cut -d. -f1,2)
@@ -1004,7 +1004,7 @@ function showNodes(){
 
         for i in "${!ORDERED_NODES[@]}"; do
             index=$(( $i + 1 ))
-            printf "%-5s %-15s %-10s\n" "$index" "${ORDERED_NODES[$i]}" "${nodeTypes[${ORDERED_NODES[$i]}]}"
+            printf "%-5s %-25s %-10s\n" "$index" "${ORDERED_NODES[$i]}" "${nodeTypes[${ORDERED_NODES[$i]}]}"
         done
         echo ""
     elif [ $displayType = "2" ]; then
@@ -1150,14 +1150,33 @@ function execUpgrade(){
         # Apply upgrade
         echo -e "⚙️[3/8]: Upgrading control-plane node, this may take up to 5 minutes"
         showProgress "Upgrading control-plane node"
-        # Master
-        if ! kubeadm upgrade apply "v$applyVersion" --yes &> /tmp/upg3; then
-            endProgress "Upgrading control-plane node" "f"
-            echo -e "Error Reasons:\n"
-            cat /tmp/upg3
-            exit 1
-        fi
-        endProgress "Upgrading control-plane node" "s"
+
+        upgraded=0
+        tried=0
+        done=0
+
+        while [ $done -eq 0 ]; do
+            tried=$(( tried + 1 ))
+
+            if [ "$tried" -lt 11 ]; then
+                # Master
+                if ! kubeadm upgrade apply "v$applyVersion" --yes &> /tmp/upg3; then
+                    echo -e "Error Reasons:\n"
+                    cat /tmp/upg3
+                    echo "Currently retrying Node upgrade ${tried}/10"
+                    sleep 5s
+                else
+                    endProgress "Upgrading control-plane node" "s"
+                    upgraded=1
+                    done=1
+                fi
+            else
+                endProgress "Upgrading control-plane node" "f"
+            fi
+        done
+        
+        [ $upgraded -eq 0 ] && { echo "Maximum trial exceeded, manual intervention required"; exit 1; }
+        
 
         # Drain node
         echo -e "⚙️[4/8]: Draining node"
@@ -1282,6 +1301,8 @@ function execRemoteUpgrade(){
                 echo "❌ Upgrade failed on node ${targetNodeIp}"
                 [[ -n "$log" ]] && echo -e "\n--- ERROR LOG ---\n$log"
                 exit 1
+            elif [ "${state_id}" == "88" ]; then
+                echo "Currently retrying Node upgrade ${tried}/10"
             fi
 
             if [ "${state_id}" == "7" ]; then
@@ -1317,7 +1338,7 @@ function upgradeCluster(){
     echo "Your current cluster version is: v${nodeVersion}"
 
     while [  $suppliedTargetVersion -eq 0 ]; do
-        read -p "Enter the Kubernetes version to upgrade the cluster to (e.g., 1.30) :" targetVersion
+        read -p "Enter the Kubernetes version to be upgraded to (e.g., 1.30) :" targetVersion
 
         # Validate version format (X.Y only)
         if ! [[ "$targetVersion" =~ ^[0-9]+\.[0-9]+$ ]]; then
@@ -1391,34 +1412,42 @@ function upgradeCluster(){
                     done
 
                     if [ $uMode = "y" ]; then
-                        upgradeMode="chain"
                         echo "The system will attempt to auto upgrade consecutively from v$nodeVersion → v$targetVersion "
                     else
                         echo "The system will only upgrade one version at a time "
                     fi
 
                     # Begin upgrade
-                    if [ $upgradeMode = "chain" ]; then
+                    if [ $uMode = "y" ]; then
                         # Attempt to auto upgrade step by step to the last version across all nodes if multinode cluster
                         for v in "${upgradeVersions[@]}"; do
                             if [ $NODE_COUNT -gt 1 ]; then
                                 # Multiple node
                                 for n in "${allNodes[@]}"; do
-                                    echo ""
-                                    echo "Initiating upgrade process of version $v on ${nodeTypes[${n}]} node '${n}'"
-                                    if [ ${n} == $server_name ];then
-                                        execUpgrade $v
-                                    else
-                                        execRemoteUpgrade $v $n
-                                    fi
                                     
-                                    echo "Upgrade to version $v on ${nodeTypes[${n}]} node '${n}' completed"
+                                        # Upgrade
+                                        echo ""
+                                        echo "Initiating Kubernetes upgrade process of version $v on ${nodeTypes[${n}]} node '${n}'"
+                                        if [ ${n} == $server_name ];then
+                                            execUpgrade $v
+                                        else
+                                            tracked=$(isTracked $n $v )
+                                            if ! [ $tracked -eq 1 ]; then
+                                                execRemoteUpgrade $v $n
+                                            else
+                                                echo "Node '${nodeTypes[${n}]}' already upgraded to version v$v"
+                                            fi
+                                        fi
+                                        
+                                        echo "Upgrade to Kubernetes version $v on ${nodeTypes[${n}]} node '${n}' completed"
+                                    
                                 done
                             else
+
                                 # Single node
-                                echo "Initiating upgrade process of version $v"
+                                echo "Initiating Kubernetes upgrade process of version $v"
                                 execUpgrade $v
-                                echo "Upgrade to version $v completed"
+                                echo "Upgrade to Kubernetes version $v completed"
                             fi
                            
                         done
@@ -1431,8 +1460,8 @@ function upgradeCluster(){
 
                             # Check if at the last version
                             [ $lastVersion = $targetVersion ] && { final=1; }
-
-                            read -p "Do you want to initiate upgrade for version ${targetVersion} (Y/N)? : " uNext
+                            echo ""
+                            read -p "Do you want to initiate Kubernetes upgrade for version ${targetVersion} (Y/N)?: " uNext
 
                             uNext=${uNext,,}
 
@@ -1443,29 +1472,32 @@ function upgradeCluster(){
                             done
 
                             if [ $uNext = "y" ]; then
-                                echo "Initiating upgrade process of version $targetVersion"
-                                execUpgrade $targetVersion
-                                echo "Upgrade to version $targetVersion completed"
-
                                 if [ $NODE_COUNT -gt 1 ]; then
                                     # Multiple node
                                     for n in "${allNodes[@]}"; do
-                                        echo "Initiating upgrade process of version $targetVersion on ${nodeTypes[${n}]} node '${n}'"
+                                        echo ""
+                                        echo "Initiating upgrade process of Kubernetes to version $targetVersion on ${nodeTypes[${n}]} node '${n}'"
 
-                                        if [ ${n} == $server_name ];then
+                                        if [ ${n} == $server_name ]; then
                                             execUpgrade $targetVersion
                                         else
-                                            execRemoteUpgrade $targetVersion $n
+                                            tracked=$(isTracked $n $targetVersio )
+                                            if ! [ $tracked -eq 1 ]; then   
+                                                # Upgrade
+                                                execRemoteUpgrade $targetVersion $n
+                                            else
+                                                echo "Node '${nodeTypes[${n}]}' already upgraded to version v$v"
+                                            fi    
                                         fi
                                         
-                                        echo "Upgrade to version $targetVersion on ${nodeTypes[${n}]} node '${n}' completed"
+                                        echo "Upgrade to Kubernetes version $targetVersion on ${nodeTypes[${n}]} node '${n}' completed"
                                     done
 
                                 else
                                     # Single node
-                                    echo "Initiating upgrade process of version $targetVersion"
+                                    echo "Initiating Kubernetes upgrade process of version $targetVersion"
                                     execUpgrade $targetVersion
-                                    echo "Upgrade to version $targetVersion completed"
+                                    echo "Upgrade Kubernetes to version $targetVersion completed"
                                 fi
 
                                 currentStep+=$(( $currentStep + 1 ))
@@ -1479,20 +1511,26 @@ function upgradeCluster(){
                     if [ $NODE_COUNT -gt 1 ]; then
                         # Multiple node
                         for n in "${allNodes[@]}"; do
-                            echo "Initiating upgrade process of version $targetVersion on ${nodeTypes[${n}]} node '${n}'"
+                            echo "Initiating Kubernetes upgrade process of version $targetVersion on ${nodeTypes[${n}]} node '${n}'"
                             if [ ${n} == $server_name ];then
                                 execUpgrade $targetVersion
                             else
-                                execRemoteUpgrade $targetVersion $n
+                                tracked=$(isTracked $n $targetVersion)
+                                if ! [ $tracked -eq 1 ]; then   
+                                    # Upgrade
+                                    execRemoteUpgrade $targetVersion $n
+                                else
+                                    echo "Node '${nodeTypes[${n}]}' already upgraded to version v$v"
+                                fi
                             fi
                             
-                            echo -e "Upgrade to version $targetVersion on ${nodeTypes[${n}]} node '${n}' completed\n"
+                            echo -e "Upgrade to Kubernetes version $targetVersion on ${nodeTypes[${n}]} node '${n}' completed\n"
                         done
                     else
                         # Single node
-                        echo "Initiating upgrade process of version $targetVersion"
+                        echo "Initiating Kubernetes upgrade process of version $targetVersion"
                         execUpgrade $targetVersion
-                        echo "Upgrade to version $targetVersion completed"
+                        echo "Upgrade to Kubernetes version $targetVersion completed"
                     fi
                 fi  
 
@@ -1562,12 +1600,15 @@ function resetCluster(){
 
     echo -e "Cluster reset successfully!\n"
 }
-function upgradeClusterNode(){
+function upgradeClusterNodes(){
     # Display nodes and their versions
     showNodes "2"
     supplied=0
     maxId=$(( ${#otherNodes[@]} + 1 ))
-    
+    masterNodes=()
+    workerNodes=()
+    targetOrderedNodes=()
+
     while [ $supplied -eq 0 ]; do
         nodeIds=()
         supplied=1
@@ -1591,13 +1632,102 @@ function upgradeClusterNode(){
                 supplied=0
                 break
             fi
+
+            # separate master and worker node
+            index=$(( $id - 1 ))
+            node="${otherNodes[$index]}"
+            type="${nodeTypes[$node]}"
+            
+            if [ $type = "Master" ]; then
+                masterNodes+=($node)
+            else
+                workerNodes+=($node)
+            fi
+
             nodeIds+=("$id")
         done
-    done
 
-    # Rebuild order
-    
-    echo "ids = " ${nodeIds[@]}
+        [ $supplied -eq 0 ] && { continue; }
+
+        # Merge into one array
+        targetOrderedNodes+=("${masterNodes[@]}")
+        targetOrderedNodes+=("${workerNodes[@]}")
+
+        isValid=0
+        while [ $isValid -eq 0 ]; do
+            read -p "Enter the Kubernetes version to be upgraded to (e.g., 1.30) :" targetVersion
+
+            # Validate version format (X.Y only)
+            if ! [[ "$targetVersion" =~ ^[0-9]+\.[0-9]+$ ]]; then
+                supplied=0
+                echo "❌ Invalid version format. Use numeric format like 1.30. Please Try again"
+                continue
+            else
+                nodeMajor=${nodeVersion%%.*}
+                nodeMinor=${nodeVersion##*.}
+
+                targetMajor=${targetVersion%%.*}
+                targetMinor=${targetVersion##*.}   
+
+                # Enforce max difference of 0.01
+                # Major version must match
+                if [[ "$nodeMajor" -ne "$targetMajor" ]]; then
+                    supplied=0
+                    echo ""
+                    echo "❌ Major version mismatch: node=$nodeMajor target=$targetMajor"
+                    echo "Kindly Try again"
+                    echo ""
+                    continue
+                fi
+
+                # Absolute minor difference, only if target version is less than current master kubernetes version
+                if [ $targetMinor -gt $nodeMinor ]; then
+                    supplied=0
+                    echo ""
+                    echo "❌ Supplied is greater than this node's Kubernetes version"
+                    echo "  - This Node's version:  $nodeVersion"
+                    echo "  - Target version: $targetVersion"
+                    echo "Kindly Try again"
+                    echo ""
+                    continue
+                fi
+
+                # Check difference
+                diff=$(( targetMinor - nodeMinor ))
+                (( diff < 0 )) && diff=$(( -diff ))
+
+                if (( diff > 1 )); then
+                    supplied=0
+                    echo ""
+                    echo "❌ Version jump too large. Only one minor version step allowed."
+                    echo "  - This Node's version:   $nodeVersion"
+                    echo "  - Target version: $targetVersion"
+                    echo "Kindly Try again"
+                    echo ""
+                    continue
+                fi
+
+                isValid=1
+
+            fi
+
+            # mark as valid version
+            supplied=1
+        done       
+    done  
+
+    for n in "${targetOrderedNodes[@]}"; do
+        tracked=$(isTracked $n $targetVersion)
+        if [ ! $tracked -eq 1 ]; then   
+            # Upgrade
+            echo ""
+            echo "Initiating Kubernetes upgrade process of version $targetVersion on ${nodeTypes[${n}]} node '${n}'"
+            execRemoteUpgrade $targetVersion $n
+            echo -e "Upgrade to Kubernetes version $targetVersion on ${nodeTypes[${n}]} node '${n}' completed\n"
+        else
+            echo "${nodeTypes[${n}]} node '$n' already upgraded to Kubernetes version v$targetVersion"
+        fi
+    done
 
 }
 
@@ -1697,14 +1827,14 @@ elif [ $entSelectedOpt -eq 4 ]; then
         endProgress "Validating required dependencies" "s"
         echo ""
         PS3="Select a cluster upgrade task?: "
-        taskTypes=("Install remote upgrade agent" "Uninstall remote upgrade agent" "Check agent health status" "Upgrade cluster")
+        taskTypes=("Install remote upgrade agent" "Uninstall remote upgrade agent" "Check agent health status" "Upgrade cluster" "Reset Upgrade tracker")
         
         
         entSelectedOpt=0
 
         select res in "${taskTypes[@]}"; do
             entSelectedOpt=$((REPLY))
-            while [ $entSelectedOpt -gt 4 ]; do
+            while [ $entSelectedOpt -gt 5 ]; do
                 PS3="Please select a valid option for your task type: "
                 select res in "${taskTypes[@]}"; do
                     entSelectedOpt=$((REPLY))
@@ -1749,17 +1879,69 @@ elif [ $entSelectedOpt -eq 4 ]; then
             elif [ $entSelectedOpt -eq 2 ]; then
                 echo ""
                 echo "To upgrade a cluster node selectively, the followings must be met:"
-                printf "%d. %s\n" "1" "This node '$server_name' kubelet version is already ahead of the node(s) to be upgraded"
-                printf "%d. %s\n" "2" "Remote upgrade agent have been deployed to the node(s) to be upgraded, and confirmed running"
-                printf "%d. %s\n" "3" "The version to upgrade the target node(s) to, can not be greater than the version ($nodeVersion) on this node '$server_name'"
+                printf "  %d. %s\n" "1" "This node '$server_name' kubelet version is already ahead of the node(s) to be upgraded"
+                printf "  %d. %s\n" "2" "Remote upgrade agent have been deployed to the node(s) to be upgraded, and confirmed running"
+                printf "  %d. %s\n" "3" "The version to upgrade the target node(s) to, can not be greater than the version ($nodeVersion) on this node '$server_name'"
                 echo ""
-                upgradeClusterNode
+                upgradeClusterNodes
             elif [ $entSelectedOpt -eq 3 ]; then
-                echo ""
-            fi
-            
-        fi
-        
-    fi
+                supplied=0
+                while [ $supplied -eq 0 ]; do
+                    read -p "Enter the Kubernetes version to be upgraded to (e.g., 1.30) :" targetVersion
 
+                    # Validate version format (X.Y only)
+                    if ! [[ "$targetVersion" =~ ^[0-9]+\.[0-9]+$ ]]; then
+                        echo "❌ Invalid version format. Use numeric format like 1.30. Please Try again"
+                        continue
+                    else
+                        nodeMajor=${nodeVersion%%.*}
+                        nodeMinor=${nodeVersion##*.}
+
+                        targetMajor=${targetVersion%%.*}
+                        targetMinor=${targetVersion##*.}   
+
+                        # Enforce max difference of 0.01
+                        # Major version must match
+                        if [[ "$nodeMajor" -ne "$targetMajor" ]]; then
+                            supplied=0
+                            echo ""
+                            echo "❌ Major version mismatch: node=$nodeMajor target=$targetMajor"
+                            echo "Kindly Try again"
+                            echo ""
+                            continue
+                        fi
+
+                        # Check difference
+                        diff=$(( targetMinor - nodeMinor ))
+                        (( diff < 0 )) && diff=$(( -diff ))
+
+                        if (( diff > 1 )); then
+                            echo ""
+                            echo "❌ Version jump too large. Only one minor version step allowed."
+                            echo "  - This Node's version:   $nodeVersion"
+                            echo "  - Target version: $targetVersion"
+                            echo "Kindly Try again"
+                            echo ""
+                            continue
+                        fi
+                    fi
+
+                    # mark as valid version
+                    supplied=1
+                done
+
+                # Upgrade
+                echo "Initiating Kubernetes upgrade process of version $targetVersion on ${nodeTypes[${server_name}]} node '${server_name}'"
+                execUpgrade $targetVersion
+                echo "Upgrade to Kubernetes version $targetVersion on ${nodeTypes[${server_name}]} node '${server_name}' completed"
+
+            fi
+        elif [ $entSelectedOpt -eq 5 ]; then
+            # Reset upgrade tracker
+            echo ""
+            showProgress "Resetting Upgrade Tracker"
+            rm -f "$trackDir/*"
+            endProgress "Resetting Upgrade Tracker" "s"
+        fi
+    fi
 fi

@@ -140,17 +140,38 @@ function execUpgrade(){
             exit 1; 
         }
 
-
         # Apply upgrade
         # Worker
-        echo "state='Upgrading node'" > $UPGRADE_STAGE
-        if ! kubeadm upgrade node &> /tmp/upg3; then
-            echo "state_id=99" >> $UPGRADE_STAGE
-            cat /tmp/upg3 >> $ERROR_LOG
-            exit 1
-        else
-            echo "state_id=4" >> $UPGRADE_STAGE
-        fi
+        upgraded=0
+        tried=0
+        done=0
+        while [ $done -eq 0 ]; do
+            
+            echo "state='Upgrading node'" > $UPGRADE_STAGE
+
+            if [ $tried -lt 11 ]; then
+                if ! kubeadm upgrade node &> /tmp/upg3; then
+                    echo "state_id=88" >> $UPGRADE_STAGE
+                    echo "tried=$tried" >> $UPGRADE_STAGE
+                    cat /tmp/upg3 >> $ERROR_LOG
+                    tried=$(( tried + 1 ))
+                    sleep 5s
+                else
+                    done=1
+                    upgraded=1
+                    echo "state_id=4" >> $UPGRADE_STAGE
+                fi
+            else
+                done=1
+                if [ $upgraded -eq 0 ]; then
+                    # Finished Trying 10 times
+                    echo "state_id=99" >> $UPGRADE_STAGE
+                    exit 1
+                else
+                    echo "state_id=4" >> $UPGRADE_STAGE
+                fi
+            fi
+        done
 
         # Upgrade the kubelet and kubectl
         echo "state='Upgrading kubectl and kubelet'" > $UPGRADE_STAGE
