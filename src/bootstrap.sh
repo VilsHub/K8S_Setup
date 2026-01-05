@@ -2,7 +2,7 @@
 set -euo pipefail
 
 HOST_TOOL_DIR="/host-scripts/k8s/tool"
-id
+
 # Ensure host directory exists
 mkdir -p "$HOST_TOOL_DIR"
 

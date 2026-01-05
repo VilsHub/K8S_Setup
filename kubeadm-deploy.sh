@@ -1631,7 +1631,6 @@ function resetCluster(){
     kubeadm reset --cri-socket=$socketFile -f &> /dev/null
     endProgress "Executing cluster reset" "s"
     
-
     if [ -d "/etc/cni/net.d" ]; then
         rm -fr /etc/cni/net.d
     fi

@@ -252,7 +252,6 @@ fi
 # Watch for upgrade flag
 computeOSInfo
 
-
 function watch_for_upgrade() {
     while true; do
         # Check for uninstall file
