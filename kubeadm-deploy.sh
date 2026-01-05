@@ -1,6 +1,6 @@
 #!/bin/bash
 # Compute OS properties
-OS_NAME=""
+OS_NAME="" 
 VERSION=""
 DISTRO=""
 socketFile=""

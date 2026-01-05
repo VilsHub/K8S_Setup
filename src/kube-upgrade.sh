@@ -5,7 +5,7 @@ OS_NAME=""
 VERSION=""
 DISTRO=""
 pm=""
-osFamily=""
+osFamily="" 
 
 # Setup files
 ASSETS_DIR="/k8s/tool"

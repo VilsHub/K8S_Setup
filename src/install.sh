@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SYSTEM_BIN="/usr/local/bin/kube-upgrade.sh"
-SYSTEMD_SERVICE="/etc/systemd/system/kube-upgrade.service"
+SYSTEMD_SERVICE="/etc/systemd/system/kube-upgrade.service" 
 
 install -o root -g root -m 0500 "/k8s/tool/kube-upgrade.sh" "$SYSTEM_BIN"
 
