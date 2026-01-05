@@ -70,11 +70,11 @@ function getLatestPatchVersion(){
                     | sort -V \
                     | tail -n1)
         fi
-    elif [ "$distro" = "yum" ]; then
-        ALL_VERSIONS=$(yum --showduplicates list kubelet 2>/dev/null | awk '{print $2}')
+    elif [[ "$distro" = "yum" || "$distro" = "dnf" ]]; then
+        ALL_VERSIONS=$($pm --showduplicates list kubelet 2>/dev/null | awk '{print $2}')
 
         # Official repo first (assuming the repo name contains 'kube' or similar)
-        LATEST=$(yum --showduplicates list kubelet 2>/dev/null \
+        LATEST=$($pm --showduplicates list kubelet 2>/dev/null \
                 | awk -v ver="$K8S_VERSION_MINOR" '$2 ~ ("^" ver) && $1 ~ /kube/ {print $2}' \
                 | sort -V \
                 | tail -n1)
@@ -117,91 +117,118 @@ function execUpgrade(){
     createPathIfNotExist $ASSETS_DIR
     touch $ERROR_LOG
 
-    if [ $osFamily = "debian" ];then
-        # Update repo
-        echo "state='Updating repo'" > $UPGRADE_STAGE
-        echo "state_id=1" >> $UPGRADE_STAGE
-        updateRepo "apt" $k8sVersion &> /tmp/upg1
+    # Update repo
+    echo "state='Updating repo'" > $UPGRADE_STAGE
+    echo "state_id=1" >> $UPGRADE_STAGE
+    
+    updateRepo $pm $k8sVersion &> /tmp/upg1
 
-        # Get the latest patch version fo the minor version
-        LATEST=$(getLatestPatchVersion $k8sVersion "apt")
+    # Get the latest patch version fo the minor version
+    LATEST=$(getLatestPatchVersion $k8sVersion $pm)
 
-        # Upgrade kubeadm
-        echo "state='Upgrading kubeadm'" > $UPGRADE_STAGE
-        echo "state_id=2" >> $UPGRADE_STAGE
-        {
+    # Upgrade kubeadm
+    echo "state='Upgrading kubeadm'" > $UPGRADE_STAGE
+    echo "state_id=2" >> $UPGRADE_STAGE
+    {
+       if [ $osFamily = "debian" ]; then
             apt-mark unhold kubeadm &&
             apt-get update &&
             apt-get install -y kubeadm="$LATEST" &&
             apt-mark hold kubeadm
+        elif [ $osFamily = "redhat" ]; then
+            $pm versionlock delete kubeadm || true && \
+            $pm makecache && \
+            $pm install -y kubeadm-"$LATEST" && \
+            $pm versionlock add kubeadm
+        fi 
+    } &> /tmp/upg2 || { 
+        cat /tmp/upg2 >> $ERROR_LOG
+        exit 1; 
+    }
 
-        } &> /tmp/upg2 || { 
-            cat /tmp/upg2 >> $ERROR_LOG
-            exit 1; 
-        }
+    # Apply upgrade
+    # Worker
+    upgraded=0
+    tried=0
+    done=0
+    while [ $done -eq 0 ]; do
+        
+        echo "state='Upgrading node'" > $UPGRADE_STAGE
 
-        # Apply upgrade
-        # Worker
-        upgraded=0
-        tried=0
-        done=0
-        while [ $done -eq 0 ]; do
-            
-            echo "state='Upgrading node'" > $UPGRADE_STAGE
-
-            if [ $tried -lt 11 ]; then
-                if ! kubeadm upgrade node &> /tmp/upg3; then
-                    echo "state_id=88" >> $UPGRADE_STAGE
-                    echo "tried=$tried" >> $UPGRADE_STAGE
-                    cat /tmp/upg3 >> $ERROR_LOG
-                    tried=$(( tried + 1 ))
-                    sleep 5s
-                else
-                    done=1
-                    upgraded=1
-                    echo "state_id=4" >> $UPGRADE_STAGE
-                fi
+        if [ $tried -lt 11 ]; then
+            if ! kubeadm upgrade node &> /tmp/upg3; then
+                echo "state_id=88" >> $UPGRADE_STAGE
+                echo "tried=$tried" >> $UPGRADE_STAGE
+                cat /tmp/upg3 >> $ERROR_LOG
+                tried=$(( tried + 1 ))
+                sleep 5s
             else
                 done=1
-                if [ $upgraded -eq 0 ]; then
-                    # Finished Trying 10 times
-                    echo "state_id=99" >> $UPGRADE_STAGE
-                    exit 1
-                else
-                    echo "state_id=4" >> $UPGRADE_STAGE
-                fi
+                upgraded=1
+                echo "state_id=4" >> $UPGRADE_STAGE
             fi
-        done
+        else
+            done=1
+            if [ $upgraded -eq 0 ]; then
+                # Finished Trying 10 times
+                echo "state_id=99" >> $UPGRADE_STAGE
+                exit 1
+            else
+                echo "state_id=4" >> $UPGRADE_STAGE
+            fi
+        fi
+    done
 
-        # Upgrade the kubelet and kubectl
-        echo "state='Upgrading kubectl and kubelet'" > $UPGRADE_STAGE
-        echo "state_id=5" >> $UPGRADE_STAGE
+    # Upgrade the kubelet and kubectl
+    echo "state='Upgrading kubectl and kubelet'" > $UPGRADE_STAGE
+    echo "state_id=5" >> $UPGRADE_STAGE
+
+    if [ $osFamily = "debian" ]; then
         apt-mark unhold kubelet kubectl &> /tmp/upg6.1 && \
         {
             apt-get update && 
             apt-get install -y kubelet="$LATEST" kubectl
             apt-mark hold kubelet kubectl
         } &> /tmp/upg6.2 || { 
-            cat /tmp/upg6.2 >> $ERROR_LOG
+            echo "kubelet and kubectl upgrade failed"; 
+            endProgress "Upgrading kubelet and kubectl" "f"
+            echo -e "Error Reasons: \n"
+            cat /tmp/upg26.2
             exit 1; 
         }
-
-        # restart kubelet 
-        echo "state='Restarting kubectl and kubelet'" > $UPGRADE_STAGE
-        echo "state_id=6" >> $UPGRADE_STAGE
-        systemctl daemon-reload
-        if systemctl restart kubelet &> /tmp/upg7; then
-            echo "state='Restarting kubectl and kubelet successful'" > $UPGRADE_STAGE
-            echo "state_id=7" >> $UPGRADE_STAGE
-        else
-            cat "/tmp/upg7" >> $ERROR_LOG
-            exit 1
-        fi
-
-
     elif [ $osFamily = "redhat" ]; then
-        updateRepo "yum" $k8sVersion
+        # Unhold (remove version lock)
+        $pm versionlock delete kubelet kubectl &> /tmp/upg6.1 && \
+        {
+            # Refresh metadata and install
+            $pm makecache &&
+            $pm install -y kubelet-"$LATEST" kubectl &&
+            
+            # Re-hold (add version lock)
+            $pm versionlock add kubelet kubectl
+        } &> /tmp/upg6.2 || {
+            echo "kubelet and kubectl upgrade failed"
+            endProgress "Upgrading kubelet and kubectl" "f"
+            echo -e "Error Reasons:\n"
+            cat /tmp/upg6.2
+            exit 1
+        }
     fi
+
+    # restart kubelet 
+    echo "state='Restarting kubectl and kubelet'" > $UPGRADE_STAGE
+    echo "state_id=6" >> $UPGRADE_STAGE
+    systemctl daemon-reload
+    if systemctl restart kubelet &> /tmp/upg7; then
+        echo "state='Restarting kubectl and kubelet successful'" > $UPGRADE_STAGE
+        echo "state_id=7" >> $UPGRADE_STAGE
+        sleep 10s
+        rm -f $UPGRADE_STAGE
+    else
+        cat "/tmp/upg7" >> $ERROR_LOG
+        exit 1
+    fi
+
 }
 function uninstall(){
     rm -f $SYSTEM_BIN > /dev/null
@@ -254,11 +281,8 @@ function watch_for_upgrade() {
 
         echo "Upgrade requested to Kubernetes version $version"
 
-        # reset upgrade stage
-        rm -f $UPGRADE_STAGE > /dev/null
-
         execUpgrade $version
-        rm -f $UPGRADE_FLAG > /dev/null
+        rm -f $UPGRADE_FLAG &> /dev/null
         sleep "$delay"
     done
 }

@@ -1,6 +1,8 @@
 v3.0.0
 	- Optimised k8s setup flow on worker node
 	- Reorder arrange menus for better UX
+	- Added version lock for RedHat K8s packages
+	- Optimised Cluster reset functionality to remove k8s binaries if needed
 v2.2.2
 	- Fixed Typo issue
 	- Optimised the k8s task prompt to be more precise

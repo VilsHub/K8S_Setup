@@ -263,7 +263,20 @@ function computeOSInfo(){
         ;;
         centos|rhel)
             osFamily="redhat"
-            pm="yum"
+            # Select package manager and versionlock command
+            if command -v dnf &>/dev/null; then
+                pm="dnf"
+            elif command -v yum &>/dev/null; then
+                pm="yum"
+            fi
+
+
+            # install dependencies
+            if command -v dnf &>/dev/null; then
+                rpm -q python3-dnf-plugin-versionlock &>/dev/null || dnf install -y python3-dnf-plugin-versionlock &>/dev/null
+            else
+                rpm -q yum-plugin-versionlock &>/dev/null || yum install -y yum-plugin-versionlock &>/dev/null
+            fi
         ;;
         fedora)
             osFamily="fedora"
@@ -298,7 +311,7 @@ function updateRepo(){
         echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v$k8sVersion/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
         apt update -y
 
-    elif [ $mgr = "yum" ]; then
+    elif [[ $mgr = "yum" || $mgr = "dnf" ]]; then
         # This overwrites any existing configuration in /etc/yum.repos.d/kubernetes.repo
         echo "[kubernetes]"     >> /etc/yum.repos.d/kubernetes.repo
         echo "name=Kubernetes"  >> /etc/yum.repos.d/kubernetes.repo
@@ -735,11 +748,11 @@ function getLatestPatchVersion(){
                     | sort -V \
                     | tail -n1)
         fi
-    elif [ "$distro" = "yum" ]; then
-        ALL_VERSIONS=$(yum --showduplicates list kubelet 2>/dev/null | awk '{print $2}')
+    elif [[ "$distro" = "yum" || "$distro" = "dnf" ]]; then
+        ALL_VERSIONS=$($pm --showduplicates list kubelet 2>/dev/null | awk '{print $2}')
 
         # Official repo first (assuming the repo name contains 'kube' or similar)
-        LATEST=$(yum --showduplicates list kubelet 2>/dev/null \
+        LATEST=$($pm --showduplicates list kubelet 2>/dev/null \
                 | awk -v ver="$K8S_VERSION_MINOR" '$2 ~ ("^" ver) && $1 ~ /kube/ {print $2}' \
                 | sort -V \
                 | tail -n1)
@@ -767,7 +780,8 @@ function computeClusterVersionAndInstall(){
 
         LATEST=$(getLatestPatchVersion $K8S_VERSION_MINOR $distro)
         echo "Installing Kubernetes version: $LATEST"
-        yum install -y kubelet-$LATEST kubeadm-$LATEST kubectl-$LATEST
+        $pm install -y kubelet-$LATEST kubeadm-$LATEST kubectl-$LATEST
+        $pm versionlock add kubelet kubectl kubeadm
 
     fi
 }
@@ -1025,12 +1039,12 @@ function showNodes(){
 }
 function getPodIp(){
     nodeName=$1
-    POD_IP=$(kubectl get endpoints -n kube-system kube-upgrade-agent -o jsonpath="{.subsets[*].addresses[?(@.nodeName=='$nodeName')].ip}" 2> $error_log)
+    POD_IP=$(kubectl get endpoints -n vilshub-app kube-upgrade-agent -o jsonpath="{.subsets[*].addresses[?(@.nodeName=='$nodeName')].ip}" 2> $error_log)
     echo $POD_IP
 }
 function installRemoteAgent(){
     manifestFile="src/kube-upgrade-agent.yaml"
-    NAMESPACE="kube-system"       # namespace of your DaemonSet
+    NAMESPACE="vilshub-app"       # namespace of your DaemonSet
     DAEMONSET_NAME="kube-upgrade-agent"
 
     # Mark active master node
@@ -1063,7 +1077,7 @@ function installRemoteAgent(){
             break
         fi
 
-        n+=$(( $n + 1 ))
+        n=$(( $n + 1 ))
 
         if [ $n -gt 12 ]; then
             if [ $allSet -eq 0 ]; then
@@ -1081,7 +1095,7 @@ function installRemoteAgent(){
 }
 function uninstallRemoteAgent(){
     manifestFile="src/kube-upgrade-agent.yaml"
-    NAMESPACE="kube-system"       # namespace of your DaemonSet
+    NAMESPACE="vilshub-app"       # namespace of your DaemonSet
     DAEMONSET_NAME="kube-upgrade-agent"
     clusterNodes=$1
 
@@ -1118,82 +1132,88 @@ function uninstallRemoteAgent(){
 }
 function execUpgrade(){
     k8sVersion=$1
+    # Update repo
+    echo  -e "⚙️[1/8]: Updating repo"
+    showProgress "Updating repo"
+    updateRepo $pm $k8sVersion &> /tmp/upg1
+    endProgress "Updating repo" "s"
 
-    if [ $osFamily = "debian" ];then
-        # Update repo
-        echo  -e "⚙️[1/8]: Updating repo"
-        showProgress "Updating repo"
-        updateRepo "apt" $k8sVersion &> /tmp/upg1
-        endProgress "Updating repo" "s"
+    # Get the latest patch version fo the minor version
+    LATEST=$(getLatestPatchVersion $k8sVersion $pm)
+    applyVersion=$(echo $LATEST | cut -d'-' -f1)
 
-        # Get the latest patch version fo the minor version
-        LATEST=$(getLatestPatchVersion $k8sVersion "apt")
-        applyVersion=$(echo $LATEST | cut -d'-' -f1)
-
-        # Upgrade kubeadm
-        echo -e "⚙️[2/8]: Upgrading Kubeadm"
-        showProgress "Upgrading Kubeadm"
-        {
+    # Upgrade kubeadm
+    echo -e "⚙️[2/8]: Upgrading Kubeadm"
+    showProgress "Upgrading Kubeadm"
+    {
+        if [ $osFamily = "debian" ]; then
             apt-mark unhold kubeadm &&
             apt-get update &&
             apt-get install -y kubeadm="$LATEST" &&
             apt-mark hold kubeadm
+        elif [ $osFamily = "redhat" ]; then
+            $pm versionlock delete kubeadm || true && \
+            $pm makecache && \
+            $pm install -y kubeadm-"$LATEST" && \
+            $pm versionlock add kubeadm
+        fi 
+    } &> /tmp/upg2 || { 
+        echo "Kubeadm upgrade f"; 
+        echo -e "Error Reasons: \n"
+        cat /tmp/upg2
+        exit 1; 
+    }
+    endProgress "Upgrading Kubeadm" "s"
 
-        } &> /tmp/upg2 || { 
-            echo "Kubeadm upgrade f"; 
-            echo -e "Error Reasons: \n"
-            cat /tmp/upg2
-            exit 1; 
-        }
-        endProgress "Upgrading Kubeadm" "s"
+    # Apply upgrade
+    echo -e "⚙️[3/8]: Upgrading control-plane node, this may take up to 5 minutes"
+    showProgress "Upgrading control-plane node"
 
-        # Apply upgrade
-        echo -e "⚙️[3/8]: Upgrading control-plane node, this may take up to 5 minutes"
-        showProgress "Upgrading control-plane node"
+    upgraded=0
+    tried=0
+    done=0
 
-        upgraded=0
-        tried=0
-        done=0
+    while [ $done -eq 0 ]; do
+        tried=$(( tried + 1 ))
 
-        while [ $done -eq 0 ]; do
-            tried=$(( tried + 1 ))
-
-            if [ "$tried" -lt 11 ]; then
-                # Master
-                if ! kubeadm upgrade apply "v$applyVersion" --yes &> /tmp/upg3; then
-                    echo -e "Error Reasons:\n"
-                    cat /tmp/upg3
-                    echo "Currently retrying Node upgrade ${tried}/10"
-                    sleep 5s
-                else
-                    endProgress "Upgrading control-plane node" "s"
-                    upgraded=1
-                    done=1
-                fi
+        if [ "$tried" -lt 11 ]; then
+            # Master
+            if ! kubeadm upgrade apply "v$applyVersion" --yes &> /tmp/upg3; then
+                echo -e "Error Reasons:\n"
+                cat /tmp/upg3
+                echo "Currently retrying Node upgrade ${tried}/10"
+                sleep 5s
             else
-                endProgress "Upgrading control-plane node" "f"
+                endProgress "Upgrading control-plane node" "s"
+                upgraded=1
+                done=1
             fi
-        done
-        
-        [ $upgraded -eq 0 ] && { echo "Maximum trial exceeded, manual intervention required"; exit 1; }
-        
+        else
+            endProgress "Upgrading control-plane node" "f"
+        fi
+    done
+    
+    [ $upgraded -eq 0 ] && { echo "Maximum trial exceeded, manual intervention required"; exit 1; }
+    
 
-        # Drain node
-        echo -e "⚙️[4/8]: Draining node"
-        showProgress "Draining node"
+    # Drain node
+    echo -e "⚙️[4/8]: Draining node"
+    showProgress "Draining node"
 
-        kubectl drain $server_name --ignore-daemonsets &> /tmp/upg4
-        endProgress "Draining node" "s"
+    kubectl drain $server_name --ignore-daemonsets &> /tmp/upg4
+    endProgress "Draining node" "s"
 
-        # wait for eviction
-        echo -e "⚙️[5/8]: Waiting for pods eviction"
-        showProgress "Waiting for pods eviction"
-        sleep 30s
-        endProgress "Waiting for pods eviction" "s"
+    # wait for eviction
+    echo -e "⚙️[5/8]: Waiting for pods eviction"
+    showProgress "Waiting for pods eviction"
+    sleep 30s
+    endProgress "Waiting for pods eviction" "s"
 
-        # Upgrade the kubelet and kubectl
-        echo -e "⚙️[6/8]: Upgrading kubelet and kubectl"
-        showProgress "Upgrading kubelet and kubectl"
+    # Upgrade the kubelet and kubectl
+    echo -e "⚙️[6/8]: Upgrading kubelet and kubectl"
+    showProgress "Upgrading kubelet and kubectl"
+
+    if [ $osFamily = "debian" ]; then
         apt-mark unhold kubelet kubectl &> /tmp/upg6.1 && \
         {
             apt-get update && 
@@ -1206,35 +1226,51 @@ function execUpgrade(){
             cat /tmp/upg26.2
             exit 1; 
         }
-        endProgress "Upgrading kubelet and kubectl" "s"
-
-        # restart kubelet 
-        echo -e "[7/8]: Restarting kubelet"
-        showProgress "Restarting kubelet"
-        systemctl daemon-reload
-        systemctl restart kubelet &> /tmp/upg7
-        endProgress "Restarting kubelet" "s"
-
-        # uncordon node
-        echo -e "⚙️[8/8]: Uncordoning node"
-        showProgress "Uncordoning node"
-        kubectl uncordon $server_name &> /tmp/upg8
-        endProgress "Uncordoning node" "s"
-
-        # Track upgrade
-        trackUpgrade $server_name $k8sVersion
-
-        echo -e "Upgrade process completed\n"
-
     elif [ $osFamily = "redhat" ]; then
-        updateRepo "yum" $k8sVersion
+        # Unhold (remove version lock)
+        $pm versionlock delete kubelet kubectl &> /tmp/upg6.1 && \
+        {
+            # Refresh metadata and install
+            $pm makecache &&
+            $pm install -y kubelet-"$LATEST" kubectl &&
+            
+            # Re-hold (add version lock)
+            $pm versionlock add kubelet kubectl
+        } &> /tmp/upg6.2 || {
+            echo "kubelet and kubectl upgrade failed"
+            endProgress "Upgrading kubelet and kubectl" "f"
+            echo -e "Error Reasons:\n"
+            cat /tmp/upg6.2
+            exit 1
+        }
     fi
+    
+    endProgress "Upgrading kubelet and kubectl" "s"
+
+    # restart kubelet 
+    echo -e "[7/8]: Restarting kubelet"
+    showProgress "Restarting kubelet"
+    systemctl daemon-reload
+    systemctl restart kubelet &> /tmp/upg7
+    endProgress "Restarting kubelet" "s"
+
+    # uncordon node
+    echo -e "⚙️[8/8]: Uncordoning node"
+    showProgress "Uncordoning node"
+    kubectl uncordon $server_name &> /tmp/upg8
+    endProgress "Uncordoning node" "s"
+
+    # Track upgrade
+    trackUpgrade $server_name $k8sVersion
+
+    echo -e "Upgrade process completed\n"
+   
 }
 function drainRemoteNode(){
     nodeName=$1
     drained=0
     while [ $drained -eq 0 ]; do
-        if [ ! kubectl drain $nodeName --ignore-daemonsets &> /dev/null ]; then
+        if ! kubectl drain $nodeName --ignore-daemonsets &> /dev/null; then
             echo "Drainig node '$nodeName' failed, Trying again...."
         else
             drained=1
@@ -1338,7 +1374,7 @@ function upgradeCluster(){
     echo "Your current cluster version is: v${nodeVersion}"
 
     while [  $suppliedTargetVersion -eq 0 ]; do
-        read -p "Enter the Kubernetes version to be upgraded to (e.g., 1.30) :" targetVersion
+        read -p "Enter the Kubernetes version to be upgraded to (e.g., 1.30): " targetVersion
 
         # Validate version format (X.Y only)
         if ! [[ "$targetVersion" =~ ^[0-9]+\.[0-9]+$ ]]; then
@@ -1500,7 +1536,7 @@ function upgradeCluster(){
                                     echo "Upgrade Kubernetes to version $targetVersion completed"
                                 fi
 
-                                currentStep+=$(( $currentStep + 1 ))
+                                currentStep=$(( $currentStep + 1 ))
                             else
                                 final=1
                             fi
@@ -1555,7 +1591,6 @@ function checkAgentHeathState(){
 
         printf "%-20s %-7s %-10s\n" "NODE" "TYPE" "AGENT'S STATE" >> $formatFile
         printf "%-20s %-7s %-10s\n" "--------------------" "-------" "-------------" >> $formatFile
-
         for n in "${otherNodes[@]}"; do
             targetIp=$(getPodIp $n)
             nodeType=${nodeTypes[${n}]}
@@ -1577,11 +1612,25 @@ function checkAgentHeathState(){
 }
 function resetCluster(){
     runtimeType=$(selectContainerRuntime "Please select the container runtime that the cluster was initialized with: " "The selected option is invalid, please select the container runtime that the cluster was initialized with: ")
-    socketFile=$(getSocket $runtimeType 1)
-    echo -e "\nExecuting cluster reset....."
-    kubeadm reset --cri-socket=$socketFile -f &> /dev/null
+    read -p "Do you want to uninstall the K8S binaries (kubelet, kubeadm and kubectl) after reset (Y/N)?: " uninstall
 
-    echo -e "Executing files clean up...."
+    uninstall=${uninstall,,}
+
+    while [[ $uninstall != "y" && $uninstall != "n" ]]; do
+        echo "$uninstall is not a valid input, Please supply a valid input: Y or N"
+        read -p "Do you want a chain upgrade (Y/N)?: " uninstall
+        uninstall=${uninstall,,}
+    done
+    if [ $uninstall = "y" ]; then
+        echo "K8S binaries (kubelet, kubeadm and kubectl) would be removed after reset"
+        echo ""
+    fi
+
+    socketFile=$(getSocket $runtimeType 1)
+    showProgress "Executing cluster reset"
+    kubeadm reset --cri-socket=$socketFile -f &> /dev/null
+    endProgress "Executing cluster reset" "s"
+    
 
     if [ -d "/etc/cni/net.d" ]; then
         rm -fr /etc/cni/net.d
@@ -1595,9 +1644,28 @@ function resetCluster(){
         rm -fr $HOME/.kube
     fi
 
-    echo -e "Restarting Kubelet...."
-    systemctl restart kubelet
+    if [ $uninstall = "y" ]; then
+        showProgress "Removing K8S Binaries"
+        if [ $osFamily = "redhat" ]; then
+            # Unhold (remove version locks)
+            $pm versionlock delete kubeadm &> /dev/null
+            $pm versionlock delete kubelet kubectl &> /dev/null
 
+            # Remove packages
+            $pm remove -y kubeadm kubelet kubectl &> /dev/null
+        else
+            apt-mark unhold kubeadm &> /dev/null
+            apt-mark unhold kubelet kubectl &> /dev/null
+            apt remove kubeadm kubelet kubectl -y &> /dev/null
+        fi
+
+        endProgress "Removing K8S Binaries" "s"
+    else
+        showProgress "Restarting Kubelet"
+        systemctl restart kubelet
+        endProgress "Restarting Kubelet" "s"
+        echo ""
+    fi
     echo -e "Cluster reset successfully!\n"
 }
 function upgradeClusterNodes(){
@@ -1655,7 +1723,7 @@ function upgradeClusterNodes(){
 
         isValid=0
         while [ $isValid -eq 0 ]; do
-            read -p "Enter the Kubernetes version to be upgraded to (e.g., 1.30) :" targetVersion
+            read -p "Enter the Kubernetes version to be upgraded to (e.g., 1.30): " targetVersion
 
             # Validate version format (X.Y only)
             if ! [[ "$targetVersion" =~ ^[0-9]+\.[0-9]+$ ]]; then
@@ -1827,7 +1895,7 @@ elif [ $entSelectedOpt -eq 4 ]; then
         endProgress "Validating required dependencies" "s"
         echo ""
         PS3="Select a cluster upgrade task?: "
-        taskTypes=("Install remote upgrade agent" "Uninstall remote upgrade agent" "Check agent health status" "Upgrade cluster" "Reset Upgrade tracker")
+        taskTypes=("Install remote upgrade agent" "Uninstall remote upgrade agent" "Check agent health status" "Upgrade cluster node(s)" "Reset Upgrade tracker")
         
         
         entSelectedOpt=0
@@ -1887,7 +1955,7 @@ elif [ $entSelectedOpt -eq 4 ]; then
             elif [ $entSelectedOpt -eq 3 ]; then
                 supplied=0
                 while [ $supplied -eq 0 ]; do
-                    read -p "Enter the Kubernetes version to be upgraded to (e.g., 1.30) :" targetVersion
+                    read -p "Enter the Kubernetes version to be upgraded to (e.g., 1.30): " targetVersion
 
                     # Validate version format (X.Y only)
                     if ! [[ "$targetVersion" =~ ^[0-9]+\.[0-9]+$ ]]; then
@@ -1940,7 +2008,7 @@ elif [ $entSelectedOpt -eq 4 ]; then
             # Reset upgrade tracker
             echo ""
             showProgress "Resetting Upgrade Tracker"
-            rm -f "$trackDir/*"
+            rm -f $trackDir/*
             endProgress "Resetting Upgrade Tracker" "s"
         fi
     fi
