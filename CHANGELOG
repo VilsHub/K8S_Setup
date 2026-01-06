@@ -3,6 +3,10 @@ v3.0.0
 	- Reorder arrange menus for better UX
 	- Added version lock for RedHat K8s packages
 	- Optimised Cluster reset functionality to remove k8s binaries if needed
+	- Reanamed kubeadm-deploy.sh script to k8smgr, as its now robust
+	- Added support for argument usage
+	- Added help menu
+	- Added readme.md
 v2.2.2
 	- Fixed Typo issue
 	- Optimised the k8s task prompt to be more precise
