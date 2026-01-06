@@ -32,7 +32,7 @@ chmod +x k8smgr
 ---
 
 ## Help guide
-![K8S Manager help menu](https://imgur.com/a/9FZoYHA)
+![K8S Manager help menu](https://i.imgur.com/WFDt3oS.png)
 
 ---
 
@@ -91,7 +91,7 @@ Or simply run without arguments to enter interactive prompt mode:
 ### Interactive Prompt Mode
 If incorrect or missing arguments are supplied, the script automatically switches to interactive mode, guiding the user through available modes and sub-modes with color-coded menus and instructions.
 
-![K8S Manager interactive mode](https://imgur.com/a/k8smgr-interaction-mode-8AeEoye)
+![K8S Manager interactive mode](https://i.imgur.com/njYZVaF.png)
 
 ---
 
