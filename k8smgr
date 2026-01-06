@@ -2243,9 +2243,9 @@ else
     subMode=$2 # For 'manage' mode
     case $mode in
         setup) 
-            setupMode 2;;
-        init) 
             setupMode 1 ;;
+        init) 
+            setupMode 2 ;;
         join) 
             joinWorkerMode ;;
         help) 

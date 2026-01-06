@@ -1,6 +1,6 @@
 v3.0.0
 	- Optimised k8s setup flow on worker node
-	- Reorder arrange menus for better UX
+	- Rearrange prompt menus for better UX
 	- Added version lock for RedHat K8s packages
 	- Optimised Cluster reset functionality to remove k8s binaries if needed
 	- Renamed kubeadm-deploy.sh script to k8smgr, as its now robust
