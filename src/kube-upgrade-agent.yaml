@@ -32,7 +32,7 @@ spec:
       - operator: Exists
       containers:
       - name: agent
-        image: vilshub/kube-upgrade-agent:1.0.0
+        image: docker.io/vilshub/kube-upgrade-agent:1.0.0
         command:
           - uvicorn
           - agent:app
@@ -63,7 +63,7 @@ spec:
       # --- Init container: installer runs as root ---
       initContainers:
         - name: kube-installer
-          image: vilshub/kube-upgrade-agent:1.0.0
+          image: docker.io/vilshub/kube-upgrade-agent:1.0.0
           command:
             - /bin/sh
             - -c 

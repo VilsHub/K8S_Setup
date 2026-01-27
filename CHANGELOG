@@ -1,3 +1,7 @@
+v3.0.1
+	- Fixed missed setup directory check in cluster upgrade MODULE
+	- Updated image URL of the kube agent to absolute path
+
 v3.0.0
 	- Optimised k8s setup flow on worker node
 	- Rearrange prompt menus for better UX
@@ -7,6 +11,7 @@ v3.0.0
 	- Added support for argument mode usage
 	- Added help menu
 	- Added readme.md
+
 v2.2.2
 	- Fixed Typo issue
 	- Optimised the k8s task prompt to be more precise

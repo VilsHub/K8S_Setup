@@ -1498,7 +1498,7 @@ function upgradeCluster(){
             echo "❌ Invalid version format. Use numeric format like 1.30. Please Try again"
         else
             # Compare versions
-            if [ "$(printf "%s\n%s\n" "$nodeVersion" "$targetVersion" | sort -V | head -n1)" = "$nodeVersion" ] \
+            if [ "$(printf "%s\n%s\n" "$targetVersion" "$nodeVersion" | sort -V | head -n1)" != "$targetVersion" ] \
             && [ "$nodeVersion" != "$targetVersion" ]; then
                 echo -e "✅ Upgrade allowed: v$nodeVersion → v$targetVersion\n"
 
@@ -1689,7 +1689,7 @@ function upgradeCluster(){
 
                              
             else
-                echo "❌ Invalid upgrade target. Target version must be greater than current version: v$nodeVersion. Please try again"
+                echo "❌ Invalid upgrade target. Target version must be greater than or equall to the current version: v$nodeVersion. Please try again"
             fi
         fi
     done
@@ -2004,6 +2004,9 @@ function clusterUpgradeOpsMode(){
         # Install jq
         $pm install jq -y &> /dev/dull
     fi
+    # setup directory
+    initializeDir
+
     endProgress "Validating required dependencies" "s"
     echo ""
     PS3="Select a cluster upgrade task?: "
