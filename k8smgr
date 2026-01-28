@@ -387,12 +387,11 @@ function computeOSInfo(){
                 pm="yum"
             fi
 
-
             # install dependencies
             if command -v dnf &>/dev/null; then
-                rpm -q python3-dnf-plugin-versionlock &>/dev/null || dnf install -y python3-dnf-plugin-versionlock &>/dev/null
+                dnf install -y 'dnf-command(versionlock)' &>/dev/null
             else
-                rpm -q yum-plugin-versionlock &>/dev/null || yum install -y yum-plugin-versionlock &>/dev/null
+                yum install -y yum-plugin-versionlock &>/dev/null
             fi
         ;;
         fedora)
@@ -1299,7 +1298,7 @@ function execUpgrade(){
                 echo -e "Error Reasons:\n"
                 cat /tmp/upg3
                 echo "Currently retrying Node upgrade ${tried}/10"
-                sleep 5s
+                sleep 20s
             else
                 endProgress "Upgrading control-plane node" "s"
                 upgraded=1
@@ -1307,6 +1306,25 @@ function execUpgrade(){
             fi
         else
             endProgress "Upgrading control-plane node" "f"
+            
+            read -p "The API server may not be up yet, but I can retry again, can I (Y/N)?: " cani
+            
+            cani=${cani,,}
+
+            while [[ $cani != "y" && $cani != "n" ]]; do
+                echo "$cani is not a valid input, Please supply a valid input: Y or N"
+                read -p "Should I retry again (Y/N)?: " cani
+                cani=${cani,,}
+            done
+
+            if [ $cani = "y" ]; then
+                tried=0
+                echo -e "⚙️[3/8]: Retrying to upgrade control-plane node, this may take up to 5 minutes"
+                showProgress "Retrying control-plane node upgrade"
+            else
+                done=1
+            fi   
+            
         fi
     done
     

@@ -1,13 +1,15 @@
-v3.0.1
+v3.1.0
 	- Fixed missed setup directory check in cluster upgrade MODULE
 	- Updated image URL of the kube agent to absolute path
+	- Update the versionlock package for Redhat system to support modern OS version
+	- Increased node upgrade retrial delay, and added prompt to allow retry again once reach 10/10 retry
 
 v3.0.0
 	- Optimised k8s setup flow on worker node
 	- Rearrange prompt menus for better UX
 	- Added version lock for RedHat K8s packages
 	- Optimised Cluster reset functionality to remove k8s binaries if needed
-	- Renamed kubeadm-deploy.sh script to k8smgr, as its now robust
+	- Renamed kubeadm-deploy.sh script to k8smgr, as it's now robust
 	- Added support for argument mode usage
 	- Added help menu
 	- Added readme.md
