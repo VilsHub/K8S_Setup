@@ -1998,6 +1998,7 @@ ${modes}
                 - ${upgradeOps} : Launches the cluster upgrade mode, for setups, agent installation, agent's health checks
                                 and etc.
   ${help}   : Display help k8smgr help menu
+  
 ${examples}
   ${syntaxExamples}
 
