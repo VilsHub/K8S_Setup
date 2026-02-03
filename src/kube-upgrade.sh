@@ -161,7 +161,7 @@ function execUpgrade(){
                 echo "tried=$tried" >> $UPGRADE_STAGE
                 cat /tmp/upg3 >> $ERROR_LOG
                 tried=$(( tried + 1 ))
-                sleep 5s
+                sleep 20s
             else
                 done=1
                 upgraded=1
@@ -172,7 +172,7 @@ function execUpgrade(){
             if [ $upgraded -eq 0 ]; then
                 # Finished Trying 10 times
                 echo "state_id=99" >> $UPGRADE_STAGE
-                exit 1
+                tried=0
             else
                 echo "state_id=4" >> $UPGRADE_STAGE
             fi

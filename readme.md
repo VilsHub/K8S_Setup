@@ -55,6 +55,7 @@ Or simply run without arguments to enter interactive prompt mode:
 | `init`   | Install components and initialize a new Kubernetes cluster  |
 | `join`   | Join a worker node to an existing Kubernetes cluster        |
 | `manage` | Perform cluster management operations (requires a sub-mode) |
+| `help`   | Display the help menu for k8smgr                            |
 
 #### Sub-modes for **manage**
 

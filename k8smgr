@@ -14,7 +14,7 @@ otherNodes=()
 CONTROL_PLANES=()
 WORKERS=()
 ORDERED_NODES=()
-appVersion="3.0.0"
+appVersion="3.1.0"
 declare -A nodeTypes
 
 # Compute variables
@@ -483,12 +483,8 @@ function setupK8s(){
         echo -e "\n"
         intializeCluster=1
     fi
-   
-
-    
 
     containerRuntime=""
-    socketFile=""
 
     runtimeType=$(selectContainerRuntime)
     socketFile=$(getSocket $runtimeType 1)
@@ -657,7 +653,6 @@ function setupK8s(){
     fi
 
     # Choose kubelet version
-
     compatiblityDocLink=""
 
     if [ $containerRuntime = "containerd" ]; then
@@ -974,7 +969,7 @@ function joinWorkerToCluster(){
     read -p "Please specify the token hash (begining with sha256:xxxx): " tokenHash
     echo -e "\n"
     
-    kubeadm join "$reachableIP:6443" --token "$tokenValue" --discovery-token-ca-cert-hash "$tokenHash" --cri-socket="$selectContainerRuntime"
+    kubeadm join "$reachableIP:6443" --token "$tokenValue" --discovery-token-ca-cert-hash "$tokenHash" --cri-socket="$socketFile"
 }
 function xRead(){
     file=$1
@@ -1471,7 +1466,7 @@ function execRemoteUpgrade(){
             if [[ "${state_id}" == "99" ]]; then
                 echo "❌ Upgrade failed on node ${targetNodeIp}"
                 [[ -n "$log" ]] && echo -e "\n--- ERROR LOG ---\n$log"
-                exit 1
+                echo "Retrial in progress"
             elif [ "${state_id}" == "88" ]; then
                 echo "Currently retrying Node upgrade ${tried}/10"
             fi
@@ -1951,6 +1946,7 @@ setup=$(formatText "setup" "" "black" "green")
 init=$(formatText "init" "" "black" "green")
 join=$(formatText "join" "" "black" "green")
 manage=$(formatText "manage" "" "black" "green")
+help=$(formatText "help" "" "black" "green")
 
 # sub modes
 reset=$(formatText "reset" "" "black" "green")
@@ -1993,15 +1989,15 @@ ${usage}
   ${s1} | $s2
 
 ${modes}
-  ${setup}  : Setup K8S components only
+  ${setup}  : Setup K8S components only. That is to install only required components without initialization.
   ${init}   : Setup K8S components and initialize cluster
-  ${join}   : Join worker node to cluster
+  ${join}   : Join worker node to cluster. This mode assumes that all required components are in place.
   ${manage} : Cluster management operations. This mode requires a sub-mode, and the available Sub-modes are:
                 - ${reset}       : Reset the cluster
                 - ${initialize}  : Initialize cluster
                 - ${upgradeOps} : Launches the cluster upgrade mode, for setups, agent installation, agent's health checks
                                 and etc.
-
+  ${help}   : Display help k8smgr help menu
 ${examples}
   ${syntaxExamples}
 
@@ -2204,6 +2200,8 @@ function setupMode(){
 }
 function joinWorkerMode(){
     echo -e "\nYou are in K8S cluster join mode\n"
+    runtimeType=$(selectContainerRuntime "Please select the container runtime to join the cluster with: " "The selected option is invalid, please select the container runtime to join the cluster with: ")
+    socketFile=$(getSocket $runtimeType 1)
     joinWorkerToCluster
 }
 function resetClusterMode(){
@@ -2231,7 +2229,7 @@ function startPromptMode(){
         # Setup K8S only 
         setupMode 2
     elif [ $entSelectedOpt -eq 2 ]; then
-        # Setup K8S and Initialize cluster
+        # Setup K8S and Initialize cluster or join node
         setupMode 1
     elif [ $entSelectedOpt -eq 3 ]; then
         # Join worker node to cluster

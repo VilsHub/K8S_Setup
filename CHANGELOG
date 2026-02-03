@@ -1,7 +1,9 @@
 v3.1.0
 	- Fixed missed setup directory check in cluster upgrade MODULE
+	- Fixed issued with missing container runtime socket file in worker setup mode
 	- Updated image URL of the kube agent to absolute path
-	- Update the versionlock package for Redhat system to support modern OS version
+	- Updated the versionlock package for Redhat system to support modern OS version
+	- Updated the help menu
 	- Increased node upgrade retrial delay, and added prompt to allow retry again once reach 10/10 retry
 
 v3.0.0
